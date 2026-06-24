@@ -1,0 +1,25 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Deno KV database
+*.db
+*.db-shm
+*.db-wal
+
+# Deno cache
+.deno/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Assets (uploaded media — regenerated at runtime)
+assets/cards/*.png

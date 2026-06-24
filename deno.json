@@ -1,0 +1,15 @@
+{
+  "tasks": {
+    "dev": "deno run --allow-net --allow-env --allow-read=./assets --unstable-kv --env --watch src/main.ts",
+    "start": "deno run --allow-net --allow-env --allow-read=./assets --unstable-kv --env src/main.ts",
+    "test": "deno test --allow-env --unstable-kv",
+    "check": "deno check src/main.ts test/bot_test.ts"
+  },
+  "imports": {
+    "hono": "npm:hono@^4.6.0",
+    "@anthropic-ai/sdk": "npm:@anthropic-ai/sdk@^0.56.0"
+  },
+  "compilerOptions": {
+    "strict": true
+  }
+}
