@@ -43,7 +43,8 @@ export function createWhatsAppSender(): Sender {
   const token = Deno.env.get("WHATSAPP_TOKEN");
   const phoneId = Deno.env.get("WHATSAPP_PHONE_ID");
   if (!token || !phoneId) {
-    throw new Error("Set WHATSAPP_TOKEN and WHATSAPP_PHONE_ID env vars");
+    console.warn("WHATSAPP_TOKEN / WHATSAPP_PHONE_ID not set — messages will be dropped");
+    return async () => {};
   }
   const url = `https://graph.facebook.com/${GRAPH_VERSION}/${phoneId}/messages`;
 
@@ -72,7 +73,8 @@ export function createMediaUploader(): (file: string | URL) => Promise<string | 
   const token = Deno.env.get("WHATSAPP_TOKEN");
   const phoneId = Deno.env.get("WHATSAPP_PHONE_ID");
   if (!token || !phoneId) {
-    throw new Error("Set WHATSAPP_TOKEN and WHATSAPP_PHONE_ID env vars");
+    console.warn("WHATSAPP_TOKEN / WHATSAPP_PHONE_ID not set — media upload disabled");
+    return async () => null;
   }
   const url = `https://graph.facebook.com/${GRAPH_VERSION}/${phoneId}/media`;
 
