@@ -8,7 +8,7 @@
 import { DISCLAIMER, type Lang, UI } from "./content.ts";
 import { ACADEMIES, findAcademy, findLevel, findModule, LEVELS, type Loc, type Module } from "./curriculum.ts";
 import { QUIZ_BANK, quizResult } from "./quiz.ts";
-import { askClaude, claudeEnabled, probeLang } from "./claude.ts";
+import { askClaude, claudeEnabled, probeLang } from "./llm.ts";
 import { detectLang } from "./lang_detect.ts";
 import { log } from "./logger.ts";
 import type { Session, SessionStore } from "./session.ts";

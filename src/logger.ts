@@ -9,6 +9,8 @@ export type LogCategory =
   | "TEMPLATE_SEND"   // template about to be sent (Tool 3)
   | "TEMPLATE_SENT"   // template sent successfully (Tool 3)
   | "TEMPLATE_ERROR"  // template send failed (Tool 3)
+  | "GEMINI_REPLY"    // response from Gemini fallback
+  | "WARN"            // non-fatal warning (e.g. LLM failover)
   | "ERROR";          // any caught error
 
 export function log(
