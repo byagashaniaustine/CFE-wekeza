@@ -417,6 +417,6 @@ export async function askClaude(
     }
   } catch (err) {
     log("ERROR", { step: "askClaude", error: String(err) });
-    return fallback;
+    return "";
   }
 }
