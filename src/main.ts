@@ -9,15 +9,19 @@ import { createFlowEndpoint } from "./flow.ts";
 import { createMediaUploader, createWhatsAppSender, parseWebhook } from "./whatsapp.ts";
 import { sendFlowTemplate, sendPlainTemplate } from "./template_sender.ts";
 import { snapshot as metricsSnapshot } from "./metrics.ts";
-import { log } from "./logger.ts";
+import { flushLogs, log } from "./logger.ts";
 
 const app = new Hono();
 const store = await createKvStore();
 
 // Per-user message queue: chains each incoming handle() call onto the previous
 // one for that user, so concurrent webhook POSTs never race on the same session.
+// Returns the promise for THIS task so the webhook can await it before
+// responding — on Deno Deploy the isolate can be torn down as soon as the
+// handler returns, and un-awaited work (bot.handle + its log shipments) is
+// dropped silently.
 const userQueues = new Map<string, Promise<void>>();
-function enqueue(userId: string, task: () => Promise<void>): void {
+function enqueue(userId: string, task: () => Promise<void>): Promise<void> {
   const prev = userQueues.get(userId) ?? Promise.resolve();
   log("QUEUE_ENQUEUE", { userId, depth: userQueues.size });
   const next = prev.then(task).catch((err) => {
@@ -29,6 +33,7 @@ function enqueue(userId: string, task: () => Promise<void>): void {
     if (userQueues.get(userId) === next) userQueues.delete(userId);
     log("QUEUE_DONE", { userId, depth: userQueues.size });
   });
+  return next;
 }
 
 // Upload each topic card to WhatsApp on first use and cache the returned media
@@ -188,7 +193,11 @@ log("BOOT", {
   academyTemplates: Object.keys(ACADEMY_TEMPLATES).length,
   flowIds: Object.keys(FLOW_IDS).length,
   metricsProtected: Boolean(Deno.env.get("METRICS_TOKEN")),
+  streamlogia: Boolean(Deno.env.get("STREAMLOGIA_API_KEY") && Deno.env.get("STREAMLOGIA_PROJECT_ID")),
 });
+// Ship the boot event before opening the server, so it lands even on cold-start
+// isolates that may terminate the moment the first request handler completes.
+await flushLogs();
 
 app.get("/", (c) => c.text("Wekeza Bot is running 🪙"));
 
@@ -217,15 +226,16 @@ app.get("/webhook", (c) => {
   return c.text("Forbidden", 403);
 });
 
-// Inbound messages.
+// Inbound messages. We await each enqueued bot.handle() and then flushLogs()
+// BEFORE returning — otherwise Deno Deploy tears down the isolate as soon as
+// the response is sent and every in-flight log fetch is dropped.
 app.post("/webhook", async (c) => {
   const body = await c.req.json().catch(() => null);
   const messages = parseWebhook(body);
   log("WEBHOOK_POST", { messages: messages.length, hasBody: !!body });
-  // Respond 200 immediately; enqueue per-user so concurrent POSTs don't race.
-  for (const m of messages) {
-    enqueue(m.from, () => bot.handle(m.from, m.text));
-  }
+  const tasks = messages.map((m) => enqueue(m.from, () => bot.handle(m.from, m.text)));
+  await Promise.allSettled(tasks);
+  await flushLogs();
   return c.json({ ok: true });
 });
 
@@ -233,12 +243,14 @@ app.post("/webhook", async (c) => {
 app.post("/flow", async (c) => {
   if (!flowHandler) {
     log("FLOW_REQ", { configured: false });
+    await flushLogs();
     return c.text("flow endpoint not configured", 503);
   }
   const raw = await c.req.text();
   log("FLOW_REQ", { configured: true, bytes: raw.length });
   const { status, body } = await flowHandler(raw);
   log("FLOW_ENCRYPT", { status, bytes: body.length });
+  await flushLogs();
   return c.body(body, status as 200, { "content-type": "text/plain" });
 });
 

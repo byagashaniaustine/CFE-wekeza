@@ -61,6 +61,12 @@ function levelFor(category: LogCategory): "DEBUG" | "INFO" | "WARN" | "ERROR" {
   return "INFO";
 }
 
+// Tracks every in-flight shipment so a request handler can flushLogs() before
+// returning. On Deno Deploy an isolate may be torn down as soon as the handler
+// resolves, orphaning any un-awaited fetches — awaiting `pending` first keeps
+// the events from being dropped.
+const pending = new Set<Promise<void>>();
+
 function ship(entry: Record<string, unknown>, category: LogCategory): void {
   if (!SL_ENABLED) return;
   const payload = {
@@ -72,18 +78,36 @@ function ship(entry: Record<string, unknown>, category: LogCategory): void {
     tags: [category],
     meta: entry,
   };
-  // Fire-and-forget. Swallow errors — the console log already captured the
-  // event locally, and we never want to block the webhook on an ingest hiccup.
-  fetch(SL_ENDPOINT, {
+  const p: Promise<void> = fetch(SL_ENDPOINT, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${SL_API_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
-  }).catch((err) => {
-    console.error("streamlogia ship failed", String(err));
-  });
+  })
+    .then(async (res) => {
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        console.error("streamlogia ship non-2xx", res.status, body.slice(0, 300));
+      }
+    })
+    .catch((err) => {
+      console.error("streamlogia ship failed", String(err));
+    });
+  pending.add(p);
+  p.finally(() => pending.delete(p));
+}
+
+/**
+ * Await every in-flight log shipment. Call this at the end of a request
+ * handler (before returning the response) so Deno Deploy doesn't tear down
+ * the isolate mid-fetch. No-op when shipping is disabled or the queue is
+ * already empty.
+ */
+export async function flushLogs(): Promise<void> {
+  if (pending.size === 0) return;
+  await Promise.allSettled([...pending]);
 }
 
 export function log(
