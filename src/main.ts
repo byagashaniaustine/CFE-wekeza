@@ -201,6 +201,64 @@ await flushLogs();
 
 app.get("/", (c) => c.text("Wekeza Bot is running 🪙"));
 
+// Temporary diagnostic. Hit /debug/streamlogia?token=<METRICS_TOKEN> to
+// synchronously ship one test event and see the exact result — proves whether
+// the deployed isolate can reach Streamlogia and what response it gets. Guard
+// with METRICS_TOKEN so it isn't publicly probeable.
+app.get("/debug/streamlogia", async (c) => {
+  if (METRICS_TOKEN) {
+    const supplied = c.req.query("token") ??
+      (c.req.header("authorization") ?? "").replace(/^Bearer /, "");
+    if (supplied !== METRICS_TOKEN) return c.text("Unauthorized", 401);
+  }
+  const apiKey = Deno.env.get("STREAMLOGIA_API_KEY") ?? "";
+  const projectId = Deno.env.get("STREAMLOGIA_PROJECT_ID") ?? "";
+  const endpoint = Deno.env.get("STREAMLOGIA_ENDPOINT") ??
+    "https://api.streamlogia.com/v1/ingest";
+  const envCheck = {
+    apiKeyPresent: Boolean(apiKey),
+    apiKeyLen: apiKey.length,
+    projectIdPresent: Boolean(projectId),
+    projectId,
+    endpoint,
+    source: Deno.env.get("STREAMLOGIA_SOURCE") ?? "cfe-invest-bot",
+  };
+  if (!apiKey || !projectId) {
+    return c.json({ ok: false, reason: "env vars missing on deploy", envCheck });
+  }
+  const marker = `deploy-diagnostic-${Date.now()}`;
+  const started = performance.now();
+  let status = 0, body = "", err = "";
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId,
+        level: "INFO",
+        message: marker,
+        source: envCheck.source,
+        timestamp: new Date().toISOString(),
+        tags: ["DEPLOY_DIAGNOSTIC"],
+        meta: { origin: "/debug/streamlogia" },
+      }),
+    });
+    status = res.status;
+    body = (await res.text()).slice(0, 500);
+  } catch (e) {
+    err = String(e);
+  }
+  return c.json({
+    ok: status === 200,
+    marker,
+    ms: Math.round(performance.now() - started),
+    status,
+    body,
+    err,
+    envCheck,
+  });
+});
+
 // Metrics snapshot. If METRICS_TOKEN is set, callers must send
 // `Authorization: Bearer <token>` (or `?token=<token>`); otherwise the endpoint
 // is open — set the token in Deploy to keep counters private.
