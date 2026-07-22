@@ -27,9 +27,6 @@ export type LogCategory =
   | "WA_SEND"         // outbound Meta Graph send attempt
   | "WA_SEND_OK"      // outbound Meta Graph send success
   | "WA_SEND_ERROR"   // outbound Meta Graph send failed (non-2xx / network)
-  | "MEDIA_UPLOAD"    // media upload attempt
-  | "MEDIA_UPLOAD_OK" // media upload success (returns id)
-  | "MEDIA_UPLOAD_ERROR" // media upload failed
   | "TEMPLATE_SEND"   // template about to be sent (Tool 3)
   | "TEMPLATE_SENT"   // template sent successfully (Tool 3)
   | "TEMPLATE_ERROR"  // template send failed (Tool 3)
@@ -79,50 +76,150 @@ function levelFor(category: LogCategory): "debug" | "info" | "warn" | "error" {
   if (category === "WARN") return "warn";
   if (category === "TEMPLATE_ERROR") return "error";
   if (category === "WA_SEND_ERROR") return "error";
-  if (category === "MEDIA_UPLOAD_ERROR") return "error";
   return "info";
 }
 
-// Fields that make a log message actually descriptive, ordered by how useful
-// they are as a first-glance summary. Everything not in this list still lives
-// in `meta` — this just picks what surfaces in the human-facing `message`.
-const SUMMARY_KEYS = [
-  "step",
-  "branch",
-  "reason",
-  "error",
-  "msg",
-  "to",
-  "from",
-  "user",
-  "userId",
-  "kind",
-  "moduleId",
-  "topic",
-  "lang",
-  "status",
-  "ms",
-  "file",
-  "templateName",
-  "preview",
-] as const;
+// Truncate long strings for the human-facing message. Full value still lives
+// in `meta` for machines that want it.
+function clip(v: unknown, n = 120): string {
+  const s = typeof v === "string" ? v : JSON.stringify(v);
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
 
-function summarize(category: LogCategory, entry: Record<string, unknown>): string {
-  const parts: string[] = [];
-  for (const key of SUMMARY_KEYS) {
-    const raw = entry[key];
-    if (raw === undefined || raw === null || raw === "") continue;
-    const val = typeof raw === "string" ? raw : JSON.stringify(raw);
-    const trimmed = val.length > 120 ? val.slice(0, 117) + "…" : val;
-    parts.push(`${key}=${trimmed}`);
+// Human-readable one-line description of an event. The full entry ships in
+// meta for filtering / debugging — this only shapes the summary that surfaces
+// in the Streamlogia UI.
+function describe(category: LogCategory, e: Record<string, unknown>): string {
+  const g = (k: string) => (e[k] === undefined || e[k] === null ? "" : String(e[k]));
+  const has = (k: string) => e[k] !== undefined && e[k] !== null && e[k] !== "";
+  switch (category) {
+    // ── boot & webhook ingress ────────────────────────────────────────────
+    case "BOOT":
+      return `Server booted on port ${g("port") || "?"} — flow endpoint ${
+        e.flowEndpointEnabled ? "enabled" : "disabled"
+      }, ${g("moduleTemplates")} module templates, ${g("academyTemplates")} academy templates, ${
+        g("flowIds")
+      } published flows, streamlogia ${e.streamlogia ? "ON" : "OFF"}, metrics ${
+        e.metricsProtected ? "protected" : "public"
+      }`;
+    case "WEBHOOK_GET":
+      return e.ok
+        ? `Meta verified webhook (mode=${g("mode")}, token matched)`
+        : `Meta webhook verification rejected (mode=${g("mode")}, tokenMatch=${g("tokenMatch")})`;
+    case "WEBHOOK_POST":
+      return `Received webhook POST — ${g("messages")} inbound message${g("messages") === "1" ? "" : "s"} in envelope`;
+    case "PARSE_WEBHOOK": {
+      const n = g("extracted");
+      const kinds = e.kinds ? ` (${clip(JSON.stringify(e.kinds), 80)})` : "";
+      return `Parsed ${n} inbound message${n === "1" ? "" : "s"} from envelope${kinds}`;
+    }
+    // ── per-user handler queue ─────────────────────────────────────────────
+    case "QUEUE_ENQUEUE":
+      return `Queued handler for ${g("userId")} — queue depth now ${g("depth")}`;
+    case "QUEUE_DONE":
+      return `Handler finished for ${g("userId")} — queue depth ${g("depth")}`;
+    // ── bot router ─────────────────────────────────────────────────────────
+    case "INCOMING":
+      return `${g("from")} sent: "${clip(g("text"), 200)}"`;
+    case "ROUTE": {
+      const branch = g("branch");
+      const who = g("from");
+      switch (branch) {
+        case "lang_pick":
+          return `${who} chose language: ${g("lang")}`;
+        case "learn_levels":
+          return `${who} entered the Learn Investment journey (choosing level)`;
+        case "products":
+          return `${who} entered the Investment Products journey (choosing academy)`;
+        case "quiz_start":
+          return `${who} started the General Quiz`;
+        case "ask_intro":
+          return `${who} opened the Ask a Question tutor`;
+        case "main_menu":
+          return `${who} returned to the main menu`;
+        case "flow_complete":
+          return `${who} finished a WhatsApp Flow (module=${g("moduleId") || "-"})`;
+        case "module_open":
+          return `${who} opened module '${g("moduleId")}'`;
+        case "quiz_answer":
+          return `${who} answered quiz Q${g("questionIdx")} on topic '${g("topic")}' — picked option ${g("picked")} (${e.correct ? "correct" : "wrong"})`;
+        case "quiz_complete":
+          return `${who} completed the quiz — scored ${g("score")}/${g("outOf")}${e.wrongTopics && (e.wrongTopics as unknown[]).length ? `, weak topics: ${clip(JSON.stringify(e.wrongTopics), 100)}` : ""}`;
+        case "llm_tutor":
+          return `${who} asked the AI tutor (${g("chars")} chars, from state=${g("state")})`;
+        default:
+          return `${who} routed to '${branch}'`;
+      }
+    }
+    case "REPLY": {
+      const to = g("to");
+      const kind = g("kind");
+      const tool = has("tool") ? ` [${g("tool")}]` : "";
+      const preview = has("preview") ? ` — "${clip(g("preview"), 120)}"` : "";
+      return `Bot replied to ${to}${tool} — ${kind}${preview}`;
+    }
+    // ── WhatsApp Graph delivery ────────────────────────────────────────────
+    case "WA_SEND":
+      return `Sending ${g("kind")} to ${g("to")} via WhatsApp Graph API…`;
+    case "WA_SEND_OK":
+      return `Delivered ${g("kind")} to ${g("to")} in ${g("ms")}ms (HTTP ${g("status")})`;
+    case "WA_SEND_ERROR":
+      return e.network
+        ? `Network error sending ${g("kind")} to ${g("to")}: ${g("error")}`
+        : `Meta Graph rejected ${g("kind")} for ${g("to")} — HTTP ${g("status")} after ${g("ms")}ms: ${clip(g("body"), 200)}`;
+    // ── template sending ───────────────────────────────────────────────────
+    case "TEMPLATE_SEND":
+      return `Preparing template '${g("templateName")}' for ${g("to")} (components ${e.hasComponents ? "present" : "none"})`;
+    case "TEMPLATE_SENT":
+      return `Sent template '${g("templateName")}' to ${g("to")}`;
+    case "TEMPLATE_ERROR":
+      return `Template '${g("templateName")}' failed for ${g("to")} — HTTP ${g("status")}: ${clip(g("body"), 200)}`;
+    // ── WhatsApp Flows (encrypted screen navigator) ────────────────────────
+    case "FLOW_REQ":
+      return e.configured === false
+        ? "Rejected /flow POST — endpoint not configured (missing FLOW_PRIVATE_KEY)"
+        : `Received /flow POST — ${g("bytes")} bytes of ciphertext`;
+    case "FLOW_DECRYPT":
+      return e.ok
+        ? `Decrypted flow request (action=${g("action")}, screen=${g("screen") || "-"})`
+        : `Flow decryption FAILED — ${g("reason") || g("error")}`;
+    case "FLOW_PROCESS": {
+      const action = g("action");
+      const mod = g("moduleId");
+      const lang = g("lang");
+      if (action === "ping") return "Flow health check (ping) — returning active";
+      if (action === "INIT") return `Flow INIT for '${mod}' (${lang}) — ${g("total")} screens total`;
+      if (action === "NEXT") return `Flow NEXT in '${mod}' (${lang}) — screen ${g("from")} → ${g("to")} of ${g("total")}`;
+      if (action === "BACK") return `Flow BACK in '${mod}' (${lang}) — screen ${g("from")} → ${g("to")}`;
+      if (action === "DONE") return `Flow DONE for '${mod}' (${lang}) — user reached end of ${g("total")} screens`;
+      return `Flow processed action=${action}`;
+    }
+    case "FLOW_ENCRYPT":
+      return `Encrypted flow response — HTTP ${g("status")}, ${g("bytes")} bytes of ciphertext`;
+    // ── session store ──────────────────────────────────────────────────────
+    case "SESSION_GET":
+      return `Loaded session for ${g("user")} (${e.hit ? "cache HIT" : "cache MISS — new session"}, state=${g("state")}, lang=${g("lang") || "unset"}${has("moduleId") ? `, module=${g("moduleId")}` : ""})`;
+    case "SESSION_SET":
+      return `Persisted session for ${g("user")} — state=${g("state")}, lang=${g("lang") || "unset"}${has("moduleId") ? `, module=${g("moduleId")}` : ""}, lesson=${g("lessonIdx")}, screen=${g("screenIdx")}, quiz=${g("quizIdx")}`;
+    // ── intent classification / language / LLM ─────────────────────────────
+    case "CLASSIFY":
+      return `Claude classified intent as '${g("intent")}'${has("topic") ? ` (topic=${g("topic")})` : ""} — reply language: ${g("lang")}`;
+    case "LANG_DETECT":
+      return `Language detected as '${g("lang")}' via ${g("method")} — input: "${clip(g("input"), 80)}"`;
+    case "GEMINI_REPLY":
+      return `Gemini responded — ${g("chars")} chars: "${clip(g("preview"), 120)}"`;
+    // ── warnings & errors ──────────────────────────────────────────────────
+    case "WARN":
+      return `WARNING at ${g("step") || "unknown"}: ${g("msg") || g("error") || "no detail"}`;
+    case "ERROR":
+      return `ERROR at ${g("step") || "unknown"}: ${g("error") || g("msg") || "no detail"}`;
   }
-  return parts.length ? `${category} · ${parts.join(" ")}` : category;
 }
 
 function ship(entry: Record<string, unknown>, category: LogCategory): void {
   if (!client) return;
   const method = levelFor(category);
-  const message = summarize(category, entry);
+  const message = describe(category, entry);
   // The SDK's level methods enqueue synchronously and return immediately;
   // errors surface via the onError callback above.
   client[method](message, { tags: [category], meta: entry });

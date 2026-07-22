@@ -20,6 +20,3 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
-
-# Assets (uploaded media — regenerated at runtime)
-assets/cards/*.png

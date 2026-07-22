@@ -17,11 +17,8 @@ export interface Button {
 
 export interface OutboundMessage {
   to: string;
-  kind: "text" | "buttons" | "list" | "image" | "flow" | "template";
+  kind: "text" | "buttons" | "list" | "flow" | "template";
   body: string;
-  headerMediaId?: string; // image header on a "buttons" message (card + text + buttons in one)
-  mediaId?: string; // for kind "image": an uploaded WhatsApp media id (preferred)
-  mediaUrl?: string; // for kind "image": a public https URL (fallback). `body` is the caption
   buttons?: Button[];
   listButton?: string;
   rows?: ListRow[];
@@ -84,51 +81,6 @@ export function createWhatsAppSender(): Sender {
   };
 }
 
-/**
- * Uploads a local image file to WhatsApp and returns its media id.
- * The id is reusable for sending many times (Meta retains uploaded media ~30
- * days). Works the same locally and on Deploy — no public URL required.
- */
-export function createMediaUploader(): (file: string | URL) => Promise<string | null> {
-  const token = Deno.env.get("WHATSAPP_TOKEN");
-  const phoneId = Deno.env.get("WHATSAPP_PHONE_ID");
-  if (!token || !phoneId) {
-    console.warn("WHATSAPP_TOKEN / WHATSAPP_PHONE_ID not set — media upload disabled");
-    return async () => null;
-  }
-  const url = `https://graph.facebook.com/${GRAPH_VERSION}/${phoneId}/media`;
-
-  return async (file) => {
-    const fileName = String(file);
-    log("MEDIA_UPLOAD", { file: fileName });
-    try {
-      const bytes = await Deno.readFile(file);
-      const form = new FormData();
-      form.append("messaging_product", "whatsapp");
-      form.append("type", "image/png");
-      form.append("file", new Blob([bytes], { type: "image/png" }), "card.png");
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${token}` },
-        body: form,
-      });
-      if (!res.ok) {
-        const body = await res.text();
-        log("MEDIA_UPLOAD_ERROR", { file: fileName, status: res.status, body: body.slice(0, 500) });
-        console.error("media upload failed", res.status, body);
-        return null;
-      }
-      const json = await res.json() as { id?: string };
-      log("MEDIA_UPLOAD_OK", { file: fileName, mediaId: json.id ?? null, bytes: bytes.byteLength });
-      return json.id ?? null;
-    } catch (err) {
-      log("MEDIA_UPLOAD_ERROR", { file: fileName, error: String(err) });
-      console.error("media upload error", err);
-      return null;
-    }
-  };
-}
-
 function toPayload(msg: OutboundMessage): Record<string, unknown> {
   const base = {
     messaging_product: "whatsapp",
@@ -138,15 +90,6 @@ function toPayload(msg: OutboundMessage): Record<string, unknown> {
 
   if (msg.kind === "text") {
     return { ...base, type: "text", text: { body: msg.body } };
-  }
-
-  if (msg.kind === "image") {
-    const source = msg.mediaId ? { id: msg.mediaId } : { link: msg.mediaUrl };
-    return {
-      ...base,
-      type: "image",
-      image: { ...source, ...(msg.body ? { caption: msg.body } : {}) },
-    };
   }
 
   if (msg.kind === "template") {
@@ -189,9 +132,6 @@ function toPayload(msg: OutboundMessage): Record<string, unknown> {
       type: "interactive",
       interactive: {
         type: "button",
-        ...(msg.headerMediaId
-          ? { header: { type: "image", image: { id: msg.headerMediaId } } }
-          : {}),
         body: { text: msg.body },
         action: {
           buttons: (msg.buttons ?? []).slice(0, 3).map((b) => ({

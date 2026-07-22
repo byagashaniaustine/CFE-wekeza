@@ -68,8 +68,6 @@ const QUIZ_WORDS = ["quiz", "jaribio"];
 const LANG_WORDS = ["lang", "lugha", "language"];
 
 export interface BotOptions {
-  // Resolve an uploaded WhatsApp media id for a card image (e.g. the menu ad).
-  cardMediaId?: (id: string, lang: Lang) => Promise<string | null>;
   // Open a module as a native WhatsApp Flow. Returns true if launched, false to
   // fall back to message screens (e.g. no published Flow id for this module).
   launchFlow?: (to: string, moduleId: string, lang: Lang) => Promise<boolean>;
@@ -81,7 +79,7 @@ export interface BotOptions {
 }
 
 export function createBot(store: SessionStore, send: Sender, opts: BotOptions = {}) {
-  const { cardMediaId, launchFlow, sendModuleEntry, sendAcademyEntry } = opts;
+  const { launchFlow, sendModuleEntry, sendAcademyEntry } = opts;
 
   const loggedSend: Sender = async (msg) => {
     log("REPLY", {
@@ -135,10 +133,6 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
   }
 
   async function sendMainMenu(to: string, lang: Lang): Promise<void> {
-    if (cardMediaId) {
-      const id = await cardMediaId("menu", lang);
-      if (id) await loggedSend({ to, kind: "image", mediaId: id, body: "CFE.Wekeza" });
-    }
     await loggedSend({
       to,
       kind: "list",

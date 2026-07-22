@@ -6,7 +6,7 @@ import { findModule } from "./curriculum.ts";
 import type { Lang } from "./content.ts";
 import { createKvStore } from "./session.ts";
 import { createFlowEndpoint } from "./flow.ts";
-import { createMediaUploader, createWhatsAppSender, parseWebhook } from "./whatsapp.ts";
+import { createWhatsAppSender, parseWebhook } from "./whatsapp.ts";
 import { sendFlowTemplate, sendPlainTemplate } from "./template_sender.ts";
 import { snapshot as metricsSnapshot } from "./metrics.ts";
 import { flushLogs, log } from "./logger.ts";
@@ -34,29 +34,6 @@ function enqueue(userId: string, task: () => Promise<void>): Promise<void> {
     log("QUEUE_DONE", { userId, depth: userQueues.size });
   });
   return next;
-}
-
-// Upload each topic card to WhatsApp on first use and cache the returned media
-// id, so a lesson can open with its illustrated card. Works the same locally
-// and on Deploy — no public URL required. Cards live in ../assets/cards.
-const uploadMedia = createMediaUploader();
-const cardsDir = new URL("../assets/cards/", import.meta.url);
-const cardIdCache = new Map<string, string>();
-const cardPending = new Map<string, Promise<string | null>>();
-async function cardMediaId(lessonId: string, lang: Lang): Promise<string | null> {
-  const key = `${lessonId}-${lang}`;
-  const cached = cardIdCache.get(key);
-  if (cached) return cached;
-  // Deduplicate concurrent uploads for the same card.
-  const inflight = cardPending.get(key);
-  if (inflight) return inflight;
-  const promise = uploadMedia(new URL(`${key}.png`, cardsDir)).then((id) => {
-    if (id) cardIdCache.set(key, id);
-    cardPending.delete(key);
-    return id;
-  });
-  cardPending.set(key, promise);
-  return promise;
 }
 
 const send = createWhatsAppSender();
@@ -182,7 +159,7 @@ const sendAcademyEntry = async (to: string, academyId: string, lang: Lang): Prom
   return true;
 };
 
-const bot = createBot(store, send, { cardMediaId, launchFlow, sendModuleEntry, sendAcademyEntry });
+const bot = createBot(store, send, { launchFlow, sendModuleEntry, sendAcademyEntry });
 
 const VERIFY_TOKEN = Deno.env.get("WHATSAPP_VERIFY_TOKEN") ?? "wekeza-bot";
 

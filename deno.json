@@ -1,7 +1,7 @@
 {
   "tasks": {
-    "dev": "deno run --allow-net --allow-env --allow-read=./assets --unstable-kv --env --watch src/main.ts",
-    "start": "deno run --allow-net --allow-env --allow-read=./assets --unstable-kv --env src/main.ts",
+    "dev": "deno run --allow-net --allow-env --unstable-kv --env --watch src/main.ts",
+    "start": "deno run --allow-net --allow-env --unstable-kv --env src/main.ts",
     "test": "deno test --allow-env --unstable-kv",
     "check": "deno check src/main.ts test/bot_test.ts"
   },
