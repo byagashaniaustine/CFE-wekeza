@@ -11,6 +11,7 @@
 // in FLOW_PRIVATE_KEY, publish the Flow JSON below, and set its endpoint URL to
 // https://<your-app>/flow.  Docs: developers.facebook.com/docs/whatsapp/flows
 import { findModule, type Lang } from "./curriculum.ts";
+import { log } from "./logger.ts";
 
 // ─── base64 helpers ─────────────────────────────────────────────────────────────
 const b64decode = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
@@ -107,21 +108,34 @@ function screenData(moduleId: string, lang: Lang, idx: number): Record<string, u
 
 /** Pure navigation logic (exported for testing without crypto). */
 export function processFlow(body: ExchangeBody): unknown {
-  if (body.action === "ping") return { data: { status: "active" } };
+  if (body.action === "ping") {
+    log("FLOW_PROCESS", { action: "ping" });
+    return { data: { status: "active" } };
+  }
 
   const [moduleId, rawLang] = (body.flow_token ?? "basic-concepts:en").split(":");
   const lang: Lang = rawLang === "sw" ? "sw" : "en";
   const m = findModule(moduleId);
   const total = m ? m.lessons.reduce((n, l) => n + l.screens.length, 0) : 0;
 
-  if (body.action === "INIT") return { screen: "LESSON", data: screenData(moduleId, lang, 0) };
+  if (body.action === "INIT") {
+    log("FLOW_PROCESS", { action: "INIT", moduleId, lang, total });
+    return { screen: "LESSON", data: screenData(moduleId, lang, 0) };
+  }
 
   const cur = Number(body.data?.idx ?? 0);
-  if (body.action === "BACK") return { screen: "LESSON", data: screenData(moduleId, lang, cur - 1) };
+  if (body.action === "BACK") {
+    log("FLOW_PROCESS", { action: "BACK", moduleId, lang, from: cur, to: cur - 1 });
+    return { screen: "LESSON", data: screenData(moduleId, lang, cur - 1) };
+  }
 
   // data_exchange = the "Next" / footer action
   const nextIdx = Number(body.data?.next_idx ?? cur + 1);
-  if (nextIdx >= total) return { screen: "DONE", data: {} };
+  if (nextIdx >= total) {
+    log("FLOW_PROCESS", { action: "DONE", moduleId, lang, from: cur, total });
+    return { screen: "DONE", data: {} };
+  }
+  log("FLOW_PROCESS", { action: "NEXT", moduleId, lang, from: cur, to: nextIdx, total });
   return { screen: "LESSON", data: screenData(moduleId, lang, nextIdx) };
 }
 
@@ -208,12 +222,15 @@ export function createFlowEndpoint(privatePem: string) {
       return { status: 400, body: "bad request" };
     }
     if (!req?.encrypted_aes_key || !req?.encrypted_flow_data || !req?.initial_vector) {
+      log("FLOW_DECRYPT", { ok: false, reason: "missing_fields" });
       return { status: 400, body: "bad request" };
     }
     let dec;
     try {
       dec = await decryptRequest(req, await keyPromise);
+      log("FLOW_DECRYPT", { ok: true, action: dec.body.action, screen: dec.body.screen });
     } catch (err) {
+      log("FLOW_DECRYPT", { ok: false, error: String(err) });
       console.error("flow decrypt failed", err);
       return { status: 421, body: "decryption failed" }; // 421 → Meta refreshes the public key
     }

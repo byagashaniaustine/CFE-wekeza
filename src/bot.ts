@@ -321,6 +321,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
     if (text === "lang_sw" || text === "lang_en") {
       s.lang = text === "lang_sw" ? "sw" : "en";
       s.state = "menu";
+      log("ROUTE", { branch: "lang_pick", lang: s.lang, from });
       await save();
       await say(from, UI.langSet[s.lang]);
       await sendMainMenu(from, s.lang);
@@ -375,26 +376,31 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
     // ── id-based routing (buttons / list rows) ──
     if (text === "j_learn" || text === "go_learn") {
       s.state = "learn_levels";
+      log("ROUTE", { branch: "learn_levels", from });
       await save();
       return await sendLevels(from, lang);
     }
     if (text === "j_products" || text === "go_products") {
       s.state = "products";
+      log("ROUTE", { branch: "products", from });
       await save();
       return await sendAcademies(from, lang);
     }
     if (text === "j_quiz" || text === "go_quiz") {
+      log("ROUTE", { branch: "quiz_start", from });
       await startQuiz(from, s, lang);
       await save();
       return;
     }
     if (text === "j_ask") {
       s.state = "ask";
+      log("ROUTE", { branch: "ask_intro", from });
       await save();
       return await say(from, S.askIntro[lang]);
     }
     if (text === "go_main") {
       s.state = "menu";
+      log("ROUTE", { branch: "main_menu", from });
       await save();
       return await sendMainMenu(from, lang);
     }
@@ -402,6 +408,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
     // The session already has moduleId/levelId set from when the Flow was launched,
     // so surface the post-module navigation (next module / quiz / menu).
     if (text === "flow_complete") {
+      log("ROUTE", { branch: "flow_complete", from, moduleId: s.moduleId });
       if (s.moduleId) {
         await sendCompletion(from, s, lang);
       } else {
@@ -454,7 +461,9 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       return;
     }
     if (text.startsWith("mod_")) {
-      await presentModule(from, s, text.slice(4), lang);
+      const moduleId = text.slice(4);
+      log("ROUTE", { branch: "module_open", from, moduleId });
+      await presentModule(from, s, moduleId, lang);
       await save();
       return;
     }
@@ -484,9 +493,24 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
         const right = idx === q.answer;
         if (right) s.score += 1;
         else s.quizWrong.push(q.topic);
+        log("ROUTE", {
+          branch: "quiz_answer",
+          from,
+          questionIdx: s.quizIdx,
+          topic: q.topic,
+          picked: idx,
+          correct: right,
+        });
         await say(from, right ? S.correct[lang] : S.wrong[lang]);
         s.quizIdx += 1;
         if (s.quizIdx >= QUIZ_BANK.length) {
+          log("ROUTE", {
+            branch: "quiz_complete",
+            from,
+            score: s.score,
+            outOf: QUIZ_BANK.length,
+            wrongTopics: s.quizWrong,
+          });
           await say(from, quizResult(s.score, s.quizWrong, lang));
           await loggedSend({
             to: from,
@@ -505,6 +529,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
 
     // ── free-text tutor (Ask journey, or any unmatched text) ──
     if (claudeEnabled) {
+      log("ROUTE", { branch: "llm_tutor", from, state: s.state, chars: raw.length });
       const answer = await askClaude(raw.trim(), lang, s.history ?? []);
       if (answer) {
         s.history = [

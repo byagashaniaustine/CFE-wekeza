@@ -8,6 +8,8 @@ import { createKvStore } from "./session.ts";
 import { createFlowEndpoint } from "./flow.ts";
 import { createMediaUploader, createWhatsAppSender, parseWebhook } from "./whatsapp.ts";
 import { sendFlowTemplate, sendPlainTemplate } from "./template_sender.ts";
+import { snapshot as metricsSnapshot } from "./metrics.ts";
+import { log } from "./logger.ts";
 
 const app = new Hono();
 const store = await createKvStore();
@@ -17,10 +19,15 @@ const store = await createKvStore();
 const userQueues = new Map<string, Promise<void>>();
 function enqueue(userId: string, task: () => Promise<void>): void {
   const prev = userQueues.get(userId) ?? Promise.resolve();
-  const next = prev.then(task).catch((err) => console.error("handle error", err));
+  log("QUEUE_ENQUEUE", { userId, depth: userQueues.size });
+  const next = prev.then(task).catch((err) => {
+    log("ERROR", { step: "queue/handle", userId, error: String(err) });
+    console.error("handle error", err);
+  });
   userQueues.set(userId, next);
   next.finally(() => {
     if (userQueues.get(userId) === next) userQueues.delete(userId);
+    log("QUEUE_DONE", { userId, depth: userQueues.size });
   });
 }
 
@@ -174,16 +181,39 @@ const bot = createBot(store, send, { cardMediaId, launchFlow, sendModuleEntry, s
 
 const VERIFY_TOKEN = Deno.env.get("WHATSAPP_VERIFY_TOKEN") ?? "wekeza-bot";
 
+log("BOOT", {
+  port: Number(Deno.env.get("PORT") ?? 8000),
+  flowEndpointEnabled: Boolean(flowHandler),
+  moduleTemplates: Object.keys(MODULE_TEMPLATES).length,
+  academyTemplates: Object.keys(ACADEMY_TEMPLATES).length,
+  flowIds: Object.keys(FLOW_IDS).length,
+  metricsProtected: Boolean(Deno.env.get("METRICS_TOKEN")),
+});
+
 app.get("/", (c) => c.text("Wekeza Bot is running 🪙"));
+
+// Metrics snapshot. If METRICS_TOKEN is set, callers must send
+// `Authorization: Bearer <token>` (or `?token=<token>`); otherwise the endpoint
+// is open — set the token in Deploy to keep counters private.
+const METRICS_TOKEN = Deno.env.get("METRICS_TOKEN");
+app.get("/metrics", (c) => {
+  if (METRICS_TOKEN) {
+    const auth = c.req.header("authorization") ?? "";
+    const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    const supplied = bearer || c.req.query("token") || "";
+    if (supplied !== METRICS_TOKEN) return c.text("Unauthorized", 401);
+  }
+  return c.json(metricsSnapshot());
+});
 
 // Webhook verification (Meta sends this once when you configure the webhook).
 app.get("/webhook", (c) => {
   const mode = c.req.query("hub.mode");
   const token = c.req.query("hub.verify_token");
   const challenge = c.req.query("hub.challenge");
-  if (mode === "subscribe" && token === VERIFY_TOKEN && challenge) {
-    return c.text(challenge);
-  }
+  const ok = mode === "subscribe" && token === VERIFY_TOKEN && !!challenge;
+  log("WEBHOOK_GET", { mode, tokenMatch: token === VERIFY_TOKEN, ok });
+  if (ok) return c.text(challenge!);
   return c.text("Forbidden", 403);
 });
 
@@ -191,6 +221,7 @@ app.get("/webhook", (c) => {
 app.post("/webhook", async (c) => {
   const body = await c.req.json().catch(() => null);
   const messages = parseWebhook(body);
+  log("WEBHOOK_POST", { messages: messages.length, hasBody: !!body });
   // Respond 200 immediately; enqueue per-user so concurrent POSTs don't race.
   for (const m of messages) {
     enqueue(m.from, () => bot.handle(m.from, m.text));
@@ -200,9 +231,14 @@ app.post("/webhook", async (c) => {
 
 // WhatsApp Flows data-exchange endpoint (encrypted). Returns base64 ciphertext.
 app.post("/flow", async (c) => {
-  if (!flowHandler) return c.text("flow endpoint not configured", 503);
+  if (!flowHandler) {
+    log("FLOW_REQ", { configured: false });
+    return c.text("flow endpoint not configured", 503);
+  }
   const raw = await c.req.text();
+  log("FLOW_REQ", { configured: true, bytes: raw.length });
   const { status, body } = await flowHandler(raw);
+  log("FLOW_ENCRYPT", { status, bytes: body.length });
   return c.body(body, status as 200, { "content-type": "text/plain" });
 });
 

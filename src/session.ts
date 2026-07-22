@@ -1,5 +1,6 @@
 // User session store backed by Deno KV (falls back to in-memory map for tests).
 import type { Lang } from "./content.ts";
+import { log } from "./logger.ts";
 
 export type BotState =
   | "new"
@@ -61,10 +62,27 @@ export async function createKvStore(): Promise<SessionStore> {
   return {
     async get(u) {
       const r = await kv.get<Session>(["session", u]);
-      return { ...freshSession(), ...(r.value ?? {}) };
+      const s = { ...freshSession(), ...(r.value ?? {}) };
+      log("SESSION_GET", {
+        user: u,
+        hit: r.value !== null,
+        state: s.state,
+        lang: s.lang,
+        moduleId: s.moduleId,
+      });
+      return s;
     },
     async set(u, s) {
       await kv.set(["session", u], s, { expireIn: 1000 * 60 * 60 * 24 * 30 });
+      log("SESSION_SET", {
+        user: u,
+        state: s.state,
+        lang: s.lang,
+        moduleId: s.moduleId,
+        lessonIdx: s.lessonIdx,
+        screenIdx: s.screenIdx,
+        quizIdx: s.quizIdx,
+      });
     },
   };
 }

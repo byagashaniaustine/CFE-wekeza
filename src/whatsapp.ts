@@ -1,5 +1,6 @@
 // Thin client for the WhatsApp Cloud API (Meta Graph API).
 // Docs: https://developers.facebook.com/docs/whatsapp/cloud-api
+import { log } from "./logger.ts";
 
 const GRAPH_VERSION = "v21.0";
 
@@ -50,17 +51,36 @@ export function createWhatsAppSender(): Sender {
 
   return async (msg) => {
     const payload = toPayload(msg);
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      console.error("WhatsApp send failed", res.status, await res.text());
+    log("WA_SEND", { to: msg.to, kind: msg.kind });
+    const started = performance.now();
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      log("WA_SEND_ERROR", {
+        to: msg.to,
+        kind: msg.kind,
+        network: true,
+        error: String(err),
+      });
+      console.error("WhatsApp send network error", err);
+      return;
     }
+    const ms = Math.round(performance.now() - started);
+    if (!res.ok) {
+      const body = await res.text();
+      log("WA_SEND_ERROR", { to: msg.to, kind: msg.kind, status: res.status, body: body.slice(0, 500), ms });
+      console.error("WhatsApp send failed", res.status, body);
+      return;
+    }
+    log("WA_SEND_OK", { to: msg.to, kind: msg.kind, status: res.status, ms });
   };
 }
 
@@ -79,6 +99,8 @@ export function createMediaUploader(): (file: string | URL) => Promise<string | 
   const url = `https://graph.facebook.com/${GRAPH_VERSION}/${phoneId}/media`;
 
   return async (file) => {
+    const fileName = String(file);
+    log("MEDIA_UPLOAD", { file: fileName });
     try {
       const bytes = await Deno.readFile(file);
       const form = new FormData();
@@ -91,12 +113,16 @@ export function createMediaUploader(): (file: string | URL) => Promise<string | 
         body: form,
       });
       if (!res.ok) {
-        console.error("media upload failed", res.status, await res.text());
+        const body = await res.text();
+        log("MEDIA_UPLOAD_ERROR", { file: fileName, status: res.status, body: body.slice(0, 500) });
+        console.error("media upload failed", res.status, body);
         return null;
       }
       const json = await res.json() as { id?: string };
+      log("MEDIA_UPLOAD_OK", { file: fileName, mediaId: json.id ?? null, bytes: bytes.byteLength });
       return json.id ?? null;
     } catch (err) {
+      log("MEDIA_UPLOAD_ERROR", { file: fileName, error: String(err) });
       console.error("media upload error", err);
       return null;
     }
@@ -228,5 +254,6 @@ export function parseWebhook(body: any): InboundMessage[] {
       }
     }
   }
+  log("PARSE_WEBHOOK", { extracted: out.length, kinds: out.map((m) => m.text.slice(0, 24)) });
   return out;
 }
