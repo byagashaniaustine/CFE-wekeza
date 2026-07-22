@@ -16,6 +16,57 @@ export const claudeEnabled = apiKey.length > 0;
 // deno-lint-ignore no-explicit-any
 const client = claudeEnabled ? new Anthropic({ apiKey }) : (null as any);
 
+// Wraps client.messages.create with per-call latency + LLM_CALL / LLM_REPLY /
+// LLM_ERROR logs. `tool` labels the pipeline step (classify, generalQA, ...)
+// so the same underlying model call is distinguishable in the log stream.
+// deno-lint-ignore no-explicit-any
+async function callClaude(tool: string, req: any): Promise<any> {
+  const inputChars = (req.messages ?? []).reduce(
+    // deno-lint-ignore no-explicit-any
+    (n: number, m: any) => n + (typeof m.content === "string" ? m.content.length : 0),
+    0,
+  );
+  const historyTurns = Math.max(0, (req.messages?.length ?? 1) - 1);
+  log("LLM_CALL", {
+    provider: "Claude",
+    model: req.model,
+    tool,
+    chars: inputChars,
+    historyTurns,
+    maxTokens: req.max_tokens,
+  });
+  const started = performance.now();
+  try {
+    const res = await client.messages.create(req);
+    const ms = Math.round(performance.now() - started);
+    // deno-lint-ignore no-explicit-any
+    const textBlock = (res.content as any[]).find((b) => b.type === "text");
+    const outText: string = textBlock?.text ?? "";
+    log("LLM_REPLY", {
+      provider: "Claude",
+      model: req.model,
+      tool,
+      ms,
+      chars: outText.length,
+      inputTokens: res.usage?.input_tokens,
+      outputTokens: res.usage?.output_tokens,
+      stopReason: res.stop_reason,
+      preview: outText.slice(0, 200),
+    });
+    return res;
+  } catch (err) {
+    const ms = Math.round(performance.now() - started);
+    log("LLM_ERROR", {
+      provider: "Claude",
+      model: req.model,
+      tool,
+      ms,
+      error: String(err),
+    });
+    throw err;
+  }
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type Intent =
@@ -79,7 +130,7 @@ Return ONLY the JSON object.
 
 async function classifyIntent(message: string): Promise<Classification> {
   try {
-    const res = await client.messages.create({
+    const res = await callClaude("classify", {
       model: "claude-opus-4-7",
       max_tokens: 120,
       system: CLASSIFIER_PROMPT,
@@ -184,7 +235,7 @@ Rules:
 - No personal investment advice — facts and education only.
   `.trim();
 
-  const res = await client.messages.create({
+  const res = await callClaude("menuInfo", {
     model: "claude-opus-4-7",
     max_tokens: 500,
     system,
@@ -236,7 +287,7 @@ Rules:
 - No personal investment advice — facts and education only.
   `.trim();
 
-  const res = await client.messages.create({
+  const res = await callClaude("generalQA", {
     model: "claude-opus-4-7",
     max_tokens: 500,
     system,
@@ -323,7 +374,7 @@ async function creditKnowledge(
     ? "Jibu kwa Kiswahili rahisi na mafupi. Eleza kila neno la kifedha unapoitumia. Taja hati husika."
     : "Respond in simple, short English sentences. Explain every financial term. Cite the relevant document.";
 
-  const res = await client.messages.create({
+  const res = await callClaude("creditKnowledge", {
     model: "claude-opus-4-7",
     max_tokens: 700,
     system: `${CREDIT_KNOWLEDGE_SYSTEM}\n\nLanguage rule: ${langRule}`,

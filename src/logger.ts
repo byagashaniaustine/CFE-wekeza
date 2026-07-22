@@ -38,10 +38,13 @@ export type LogCategory =
   // Session
   | "SESSION_GET"     // session loaded from store
   | "SESSION_SET"     // session persisted
-  // LLM
-  | "GEMINI_REPLY"    // response from Gemini fallback
+  // LLM (both Claude and Gemini use the same categories)
+  | "LLM_CALL"        // about to call an LLM (model, tool, chars, history turns)
+  | "LLM_REPLY"       // LLM responded successfully (ms, tokens, chars, preview)
+  | "LLM_FALLBACK"    // Claude failed → invoking Gemini as backup
+  | "LLM_ERROR"       // LLM call threw / timed out
   // Generic
-  | "WARN"            // non-fatal warning (e.g. LLM failover)
+  | "WARN"            // non-fatal warning
   | "ERROR";          // any caught error
 
 // ─── Streamlogia SDK setup ──────────────────────────────────────────────────
@@ -76,6 +79,8 @@ function levelFor(category: LogCategory): "debug" | "info" | "warn" | "error" {
   if (category === "WARN") return "warn";
   if (category === "TEMPLATE_ERROR") return "error";
   if (category === "WA_SEND_ERROR") return "error";
+  if (category === "LLM_ERROR") return "error";
+  if (category === "LLM_FALLBACK") return "warn";
   return "info";
 }
 
@@ -201,13 +206,31 @@ function describe(category: LogCategory, e: Record<string, unknown>): string {
       return `Loaded session for ${g("user")} (${e.hit ? "cache HIT" : "cache MISS — new session"}, state=${g("state")}, lang=${g("lang") || "unset"}${has("moduleId") ? `, module=${g("moduleId")}` : ""})`;
     case "SESSION_SET":
       return `Persisted session for ${g("user")} — state=${g("state")}, lang=${g("lang") || "unset"}${has("moduleId") ? `, module=${g("moduleId")}` : ""}, lesson=${g("lessonIdx")}, screen=${g("screenIdx")}, quiz=${g("quizIdx")}`;
-    // ── intent classification / language / LLM ─────────────────────────────
+    // ── intent classification / language ───────────────────────────────────
     case "CLASSIFY":
       return `Claude classified intent as '${g("intent")}'${has("topic") ? ` (topic=${g("topic")})` : ""} — reply language: ${g("lang")}`;
     case "LANG_DETECT":
       return `Language detected as '${g("lang")}' via ${g("method")} — input: "${clip(g("input"), 80)}"`;
-    case "GEMINI_REPLY":
-      return `Gemini responded — ${g("chars")} chars: "${clip(g("preview"), 120)}"`;
+    // ── LLM calls (Claude + Gemini) ────────────────────────────────────────
+    case "LLM_CALL": {
+      const method = has("tool") ? ` [${g("tool")}]` : "";
+      const hist = has("historyTurns") && Number(g("historyTurns")) > 0
+        ? `, ${g("historyTurns")} history turn${g("historyTurns") === "1" ? "" : "s"}`
+        : "";
+      return `Calling ${g("provider")} ${g("model")}${method} — ${g("chars")} input chars${hist}`;
+    }
+    case "LLM_REPLY": {
+      const method = has("tool") ? ` [${g("tool")}]` : "";
+      const toks = has("inputTokens") || has("outputTokens")
+        ? `, tokens ${g("inputTokens") || "?"}→${g("outputTokens") || "?"}`
+        : "";
+      const preview = has("preview") ? `: "${clip(g("preview"), 120)}"` : "";
+      return `${g("provider")} ${g("model")}${method} responded in ${g("ms")}ms — ${g("chars")} chars out${toks}${preview}`;
+    }
+    case "LLM_FALLBACK":
+      return `Falling back to Gemini — Claude ${has("tool") ? `[${g("tool")}] ` : ""}failed after ${g("ms")}ms: ${clip(g("error"), 160)}`;
+    case "LLM_ERROR":
+      return `${g("provider") || "LLM"} ${g("model") || ""}${has("tool") ? ` [${g("tool")}]` : ""} FAILED after ${g("ms")}ms: ${clip(g("error"), 200)}`;
     // ── warnings & errors ──────────────────────────────────────────────────
     case "WARN":
       return `WARNING at ${g("step") || "unknown"}: ${g("msg") || g("error") || "no detail"}`;

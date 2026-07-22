@@ -27,11 +27,23 @@ export async function askClaude(
   history: Array<{ role: "user" | "assistant"; content: string }> = [],
 ): Promise<string> {
   if (_claudeEnabled) {
+    const started = performance.now();
     try {
       const answer = await _askClaude(message, lang, history);
       if (answer) return answer;
+      // Claude returned empty (no valid tool response) — treat as a soft fail
+      // so Gemini can take over.
+      log("LLM_FALLBACK", {
+        tool: "askClaude",
+        ms: Math.round(performance.now() - started),
+        error: "Claude returned empty response",
+      });
     } catch (err) {
-      log("WARN", { step: "llm", msg: "Claude failed, falling back to Gemini", error: String(err) });
+      log("LLM_FALLBACK", {
+        tool: "askClaude",
+        ms: Math.round(performance.now() - started),
+        error: String(err),
+      });
     }
   }
   if (geminiEnabled) return askGemini(message, lang, history);

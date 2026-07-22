@@ -70,20 +70,48 @@ const DETECT_SYSTEM =
 
 async function claudeDetect(text: string): Promise<{ lang: Lang; confident: boolean }> {
   if (!haiku) return { lang: "en", confident: false };
+  const model = "claude-haiku-4-5-20251001";
+  const trimmed = text.slice(0, 300);
+  log("LLM_CALL", {
+    provider: "Claude",
+    model,
+    tool: "detectLang",
+    chars: trimmed.length,
+    historyTurns: 0,
+  });
+  const started = performance.now();
   try {
     const res = await haiku.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model,
       max_tokens: 5,
       system: DETECT_SYSTEM,
-      messages: [{ role: "user", content: text.slice(0, 300) }],
+      messages: [{ role: "user", content: trimmed }],
     });
+    const ms = Math.round(performance.now() - started);
     // deno-lint-ignore no-explicit-any
     const raw: string = (res.content[0] as any).text?.trim().toLowerCase() ?? "en";
     const lang: Lang = raw.startsWith("sw") ? "sw" : "en";
+    log("LLM_REPLY", {
+      provider: "Claude",
+      model,
+      tool: "detectLang",
+      ms,
+      chars: raw.length,
+      inputTokens: res.usage?.input_tokens,
+      outputTokens: res.usage?.output_tokens,
+      preview: raw,
+    });
     log("LANG_DETECT", { method: "claude-haiku", lang, input: text.slice(0, 60) });
     return { lang, confident: true };
   } catch (err) {
-    log("ERROR", { step: "detectLang/haiku", error: String(err) });
+    const ms = Math.round(performance.now() - started);
+    log("LLM_ERROR", {
+      provider: "Claude",
+      model,
+      tool: "detectLang",
+      ms,
+      error: String(err),
+    });
     return { lang: "en", confident: false };
   }
 }

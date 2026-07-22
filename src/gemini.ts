@@ -88,9 +88,19 @@ export async function askGemini(
     ? "Jibu kwa Kiswahili rahisi na mafupi. Eleza kila neno la kifedha unapoitumia."
     : "Respond in simple, everyday English. Short sentences. Explain every financial term.";
 
+  const modelName = "gemini-2.5-flash";
+  const inputChars = message.length + history.reduce((n, h) => n + h.content.length, 0);
+  log("LLM_CALL", {
+    provider: "Gemini",
+    model: modelName,
+    tool: "askGemini",
+    chars: inputChars,
+    historyTurns: history.length,
+  });
+  const started = performance.now();
   try {
     const model = genai.getGenerativeModel({
-      model: "gemini-2.5-flash",
+      model: modelName,
       systemInstruction: `${BASE_SYSTEM}\n\nLanguage rule: ${langRule}`,
       // deno-lint-ignore no-explicit-any
       tools: [{ googleSearch: {} } as any],
@@ -111,10 +121,28 @@ export async function askGemini(
       .replace(/#+/g, "")
       .trim();
 
-    log("GEMINI_REPLY", { chars: text.length, preview: text.slice(0, 120) });
+    const ms = Math.round(performance.now() - started);
+    const usage = result.response.usageMetadata;
+    log("LLM_REPLY", {
+      provider: "Gemini",
+      model: modelName,
+      tool: "askGemini",
+      ms,
+      chars: text.length,
+      inputTokens: usage?.promptTokenCount,
+      outputTokens: usage?.candidatesTokenCount,
+      preview: text.slice(0, 200),
+    });
     return text || fallback;
   } catch (err) {
-    log("ERROR", { step: "askGemini", error: String(err) });
+    const ms = Math.round(performance.now() - started);
+    log("LLM_ERROR", {
+      provider: "Gemini",
+      model: modelName,
+      tool: "askGemini",
+      ms,
+      error: String(err),
+    });
     return fallback;
   }
 }
