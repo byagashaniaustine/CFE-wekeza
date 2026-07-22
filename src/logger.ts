@@ -1,9 +1,14 @@
-// Structured JSON logger. Each line is one event, easy to grep or pipe to jq.
+// Structured JSON logger. Each event is written to stdout as one JSON line
+// (easy to grep / pipe to jq) and shipped to Streamlogia via the official
+// @streamlogia/javascript-sdk. Shipping is disabled automatically when
+// STREAMLOGIA_API_KEY or STREAMLOGIA_PROJECT_ID is unset.
 //
-// Every event is also shipped to Streamlogia (POST /v1/ingest, Bearer auth) —
-// fire-and-forget, so a slow or failing log backend never blocks a webhook.
-// Ingestion is disabled automatically when STREAMLOGIA_API_KEY or
-// STREAMLOGIA_PROJECT_ID is unset (local dev keeps working).
+// The SDK is configured with batchSize=1 so every call ships immediately —
+// this matches Deno Deploy's serverless execution model, where an isolate
+// can be torn down as soon as a request handler resolves. flushLogs() is
+// still called at the end of each request handler to await any promises the
+// SDK has in flight before the response goes out.
+import { LogIngestorClient } from "@streamlogia/javascript-sdk";
 
 export type LogCategory =
   // Ingress / egress
@@ -42,72 +47,59 @@ export type LogCategory =
   | "WARN"            // non-fatal warning (e.g. LLM failover)
   | "ERROR";          // any caught error
 
-// ─── streamlogia shipping ───────────────────────────────────────────────────
-// Environment is read once at module load. Missing key / project → shipping
-// disabled (no-op) so local dev is unaffected.
+// ─── Streamlogia SDK setup ──────────────────────────────────────────────────
 const SL_API_KEY = Deno.env.get("STREAMLOGIA_API_KEY") ?? "";
 const SL_PROJECT_ID = Deno.env.get("STREAMLOGIA_PROJECT_ID") ?? "";
 const SL_SOURCE = Deno.env.get("STREAMLOGIA_SOURCE") ?? "cfe-invest-bot";
-const SL_ENDPOINT = Deno.env.get("STREAMLOGIA_ENDPOINT") ??
-  "https://api.streamlogia.com/v1/ingest";
+// The SDK appends /v1/ingest to baseURL internally, so strip any suffix if the
+// env var was set to the full ingest URL (backward-compatible with older docs).
+const SL_BASE_URL = (Deno.env.get("STREAMLOGIA_ENDPOINT") ?? "https://api.streamlogia.com")
+  .replace(/\/v1\/ingest\/?$/, "");
 const SL_ENABLED = Boolean(SL_API_KEY && SL_PROJECT_ID);
 
-function levelFor(category: LogCategory): "DEBUG" | "INFO" | "WARN" | "ERROR" {
-  if (category === "ERROR") return "ERROR";
-  if (category === "WARN") return "WARN";
-  if (category === "TEMPLATE_ERROR") return "ERROR";
-  if (category === "WA_SEND_ERROR") return "ERROR";
-  if (category === "MEDIA_UPLOAD_ERROR") return "ERROR";
-  return "INFO";
+const client = SL_ENABLED
+  ? new LogIngestorClient({
+    apiKey: SL_API_KEY,
+    projectId: SL_PROJECT_ID,
+    source: SL_SOURCE,
+    baseURL: SL_BASE_URL,
+    // batchSize=1 → every call ships immediately (default, but explicit).
+    batchSize: 1,
+    // We already write JSON to stdout ourselves — disable the SDK's built-in
+    // console mirroring to avoid double-printing every event.
+    console: false,
+    onError: (err: unknown) => {
+      console.error("[streamlogia]", String(err));
+    },
+  })
+  : null;
+
+function levelFor(category: LogCategory): "debug" | "info" | "warn" | "error" {
+  if (category === "ERROR") return "error";
+  if (category === "WARN") return "warn";
+  if (category === "TEMPLATE_ERROR") return "error";
+  if (category === "WA_SEND_ERROR") return "error";
+  if (category === "MEDIA_UPLOAD_ERROR") return "error";
+  return "info";
 }
 
-// Tracks every in-flight shipment so a request handler can flushLogs() before
-// returning. On Deno Deploy an isolate may be torn down as soon as the handler
-// resolves, orphaning any un-awaited fetches — awaiting `pending` first keeps
-// the events from being dropped.
-const pending = new Set<Promise<void>>();
-
 function ship(entry: Record<string, unknown>, category: LogCategory): void {
-  if (!SL_ENABLED) return;
-  const payload = {
-    projectId: SL_PROJECT_ID,
-    level: levelFor(category),
-    message: String(entry.step ?? entry.msg ?? category),
-    source: SL_SOURCE,
-    timestamp: entry.ts,
-    tags: [category],
-    meta: entry,
-  };
-  const p: Promise<void> = fetch(SL_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${SL_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  })
-    .then(async (res) => {
-      if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        console.error("streamlogia ship non-2xx", res.status, body.slice(0, 300));
-      }
-    })
-    .catch((err) => {
-      console.error("streamlogia ship failed", String(err));
-    });
-  pending.add(p);
-  p.finally(() => pending.delete(p));
+  if (!client) return;
+  const method = levelFor(category);
+  const message = String(entry.step ?? entry.msg ?? category);
+  // The SDK's level methods enqueue synchronously and return immediately;
+  // errors surface via the onError callback above.
+  client[method](message, { tags: [category], meta: entry });
 }
 
 /**
- * Await every in-flight log shipment. Call this at the end of a request
- * handler (before returning the response) so Deno Deploy doesn't tear down
- * the isolate mid-fetch. No-op when shipping is disabled or the queue is
- * already empty.
+ * Await the SDK's internal shipment queue. Call this at the end of every
+ * request handler (before returning) so Deno Deploy doesn't tear down the
+ * isolate mid-fetch. No-op when shipping is disabled.
  */
 export async function flushLogs(): Promise<void> {
-  if (pending.size === 0) return;
-  await Promise.allSettled([...pending]);
+  if (!client) return;
+  await client.flush();
 }
 
 export function log(

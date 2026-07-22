@@ -3,6 +3,8 @@
   "specifiers": {
     "npm:@anthropic-ai/sdk@0.56": "0.56.0",
     "npm:@google/generative-ai@0.21": "0.21.0",
+    "npm:@streamlogia/javascript-sdk@1": "1.0.0",
+    "npm:@streamlogia/javascript-sdk@1.0.0": "1.0.0",
     "npm:hono@^4.6.0": "4.12.25"
   },
   "npm": {
@@ -13,6 +15,9 @@
     "@google/generative-ai@0.21.0": {
       "integrity": "sha512-7XhUbtnlkSEZK15kN3t+tzIMxsbKm/dSkKBFalj+20NvPKe1kBY7mR2P7vuijEn+f06z5+A8bVGKO0v39cr6Wg=="
     },
+    "@streamlogia/javascript-sdk@1.0.0": {
+      "integrity": "sha512-9PXDG3FAe2Z0fhTklneUAVyW48DDosWdsXhMUTWIMOX1WeNkOmI250f6++vyjImWhUqzKQlYbe2kjLO8RW9wiw=="
+    },
     "hono@4.12.25": {
       "integrity": "sha512-2NFaIyNVgJmBs/ecmtGzlmluTFs5cHEWGTdu0t1HBwYzoGXOL5nUQBRMXsXWla5i4KkG//QMzVP88m1+I3fdAQ=="
     }
@@ -21,6 +26,7 @@
     "dependencies": [
       "npm:@anthropic-ai/sdk@0.56",
       "npm:@google/generative-ai@0.21",
+      "npm:@streamlogia/javascript-sdk@1",
       "npm:hono@^4.6.0"
     ]
   }
