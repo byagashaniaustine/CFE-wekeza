@@ -83,10 +83,46 @@ function levelFor(category: LogCategory): "debug" | "info" | "warn" | "error" {
   return "info";
 }
 
+// Fields that make a log message actually descriptive, ordered by how useful
+// they are as a first-glance summary. Everything not in this list still lives
+// in `meta` — this just picks what surfaces in the human-facing `message`.
+const SUMMARY_KEYS = [
+  "step",
+  "branch",
+  "reason",
+  "error",
+  "msg",
+  "to",
+  "from",
+  "user",
+  "userId",
+  "kind",
+  "moduleId",
+  "topic",
+  "lang",
+  "status",
+  "ms",
+  "file",
+  "templateName",
+  "preview",
+] as const;
+
+function summarize(category: LogCategory, entry: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const key of SUMMARY_KEYS) {
+    const raw = entry[key];
+    if (raw === undefined || raw === null || raw === "") continue;
+    const val = typeof raw === "string" ? raw : JSON.stringify(raw);
+    const trimmed = val.length > 120 ? val.slice(0, 117) + "…" : val;
+    parts.push(`${key}=${trimmed}`);
+  }
+  return parts.length ? `${category} · ${parts.join(" ")}` : category;
+}
+
 function ship(entry: Record<string, unknown>, category: LogCategory): void {
   if (!client) return;
   const method = levelFor(category);
-  const message = String(entry.step ?? entry.msg ?? category);
+  const message = summarize(category, entry);
   // The SDK's level methods enqueue synchronously and return immediately;
   // errors surface via the onError callback above.
   client[method](message, { tags: [category], meta: entry });
