@@ -38,6 +38,9 @@ export type LogCategory =
   // Session
   | "SESSION_GET"     // session loaded from store
   | "SESSION_SET"     // session persisted
+  // Onboarding (Invest now → Flow → lead capture)
+  | "ONBOARDING_SEND_ERROR" // onboarding template send failed (non-fatal — best-effort follow-up)
+  | "ONBOARDING_LEAD"       // captured user lead from onboarding Flow submission
   // LLM (both Claude and Gemini use the same categories)
   | "LLM_CALL"        // about to call an LLM (model, tool, chars, history turns)
   | "LLM_REPLY"       // LLM responded successfully (ms, tokens, chars, preview)
@@ -201,6 +204,11 @@ function describe(category: LogCategory, e: Record<string, unknown>): string {
     }
     case "FLOW_ENCRYPT":
       return `Encrypted flow response — HTTP ${g("status")}, ${g("bytes")} bytes of ciphertext`;
+    // ── onboarding (Invest now flow → lead capture) ────────────────────────
+    case "ONBOARDING_SEND_ERROR":
+      return `Onboarding template send failed for ${g("to")} (lang=${g("lang")}) — ${clip(g("error"), 200)}`;
+    case "ONBOARDING_LEAD":
+      return `Onboarding lead captured from ${g("from")} (token=${g("token")}) — ${clip(g("response"), 200)}`;
     // ── session store ──────────────────────────────────────────────────────
     case "SESSION_GET":
       return `Loaded session for ${g("user")} (${e.hit ? "cache HIT" : "cache MISS — new session"}, state=${g("state")}, lang=${g("lang") || "unset"}${has("moduleId") ? `, module=${g("moduleId")}` : ""})`;
