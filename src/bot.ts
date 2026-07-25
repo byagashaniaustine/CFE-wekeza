@@ -59,6 +59,10 @@ const S = {
     "Uliza swali lolote kuhusu uwekezaji Tanzania. Andika swali lako, au andika 'menyu' kurudi.\n\nMifano:\n- UTT ni nini?\n- Hatifungani hufanyaje kazi?\n- DSE ina hatari?",
   ),
   hint: L("Please choose from the menu, or type 'menu'.", "Tafadhali chagua kwenye menyu, au andika 'menyu'."),
+  onboardingThanks: L(
+    "Thank you. We have received your details and will help you get started — you'll get a message shortly.",
+    "Asante. Tumepokea taarifa zako na tutakusaidia kuanza — utapokea ujumbe hivi karibuni.",
+  ),
 };
 
 const NAV_WORDS = ["menu", "menyu", "main", "start", "anza"];
@@ -76,10 +80,13 @@ export interface BotOptions {
   sendModuleEntry?: (to: string, moduleId: string, lang: Lang) => Promise<boolean>;
   // Send a product-academy as its approved template. Returns true if sent.
   sendAcademyEntry?: (to: string, academyId: string, lang: Lang) => Promise<boolean>;
+  // Send the onboarding ("Invest now") template — Flow button opens the onboarding
+  // Flow (CHOOSE → UTT/DSE/coming-soon). Returns true if sent.
+  sendOnboardingEntry?: (to: string, lang: Lang) => Promise<boolean>;
 }
 
 export function createBot(store: SessionStore, send: Sender, opts: BotOptions = {}) {
-  const { launchFlow, sendModuleEntry, sendAcademyEntry } = opts;
+  const { launchFlow, sendModuleEntry, sendAcademyEntry, sendOnboardingEntry } = opts;
 
   const loggedSend: Sender = async (msg) => {
     log("REPLY", {
@@ -93,6 +100,18 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
   };
 
   const say = (to: string, body: string) => loggedSend({ to, kind: "text", body });
+
+  // Fire the onboarding ("Invest now") template as an extra prompt. Best-effort:
+  // a template error (e.g. name not yet approved) must never break the menu or
+  // completion message it follows.
+  async function offerOnboarding(to: string, lang: Lang): Promise<void> {
+    if (!sendOnboardingEntry) return;
+    try {
+      await sendOnboardingEntry(to, lang);
+    } catch (err) {
+      log("ONBOARDING_SEND_ERROR", { to, lang, error: String(err) });
+    }
+  }
 
   // ── module sequencing for the linear level/academy walk ─────────────────────
   function currentGroup(s: Session) {
@@ -240,6 +259,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       body: `${head}${S.moduleDone[lang]}\n\n${DISCLAIMER[lang]}`,
       buttons: moduleNavButtons(s, lang),
     });
+    await offerOnboarding(to, lang); // prompt to invest every time a module finishes
   }
 
   // Present a module: approved template (Flow + Next) if available, else native
@@ -331,6 +351,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       s.state = "menu";
       await save();
       await sendMainMenu(from, s.lang);
+      await offerOnboarding(from, s.lang); // prompt to invest every time a user greets
       return;
     }
 
@@ -409,6 +430,17 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
         await sendMainMenu(from, lang);
       }
       await save();
+      return;
+    }
+    // Onboarding Flow completion — the lead was captured inside the Flow (logged by
+    // parseWebhook). Acknowledge and return to the menu; do NOT treat as a module
+    // completion and do NOT re-offer onboarding here.
+    if (text === "onboarding_done") {
+      log("ROUTE", { branch: "onboarding_done", from });
+      s.state = "menu";
+      await save();
+      await say(from, S.onboardingThanks[lang]);
+      await sendMainMenu(from, lang);
       return;
     }
     if (text.startsWith("lvl_")) {

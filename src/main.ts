@@ -118,6 +118,19 @@ const ACADEMY_TEMPLATES: Record<string, string> = {
   ...JSON.parse(Deno.env.get("ACADEMY_TEMPLATES") ?? "{}"),
 };
 
+// Onboarding ("Invest now") templates — the Flow button at index 0 opens the
+// onboarding Flow on its CHOOSE screen (UTT / DSE / coming-soon). Registered in
+// WhatsApp Manager under language code "en"; the _sw name simply holds Swahili
+// content. Override names via the ONBOARDING_TEMPLATES env var.
+const DEFAULT_ONBOARDING_TEMPLATES: Record<string, string> = {
+  "onboarding-sw": "onboarding_sw",
+  "onboarding-en": "onboarding_en", // TODO: confirm the EN template name in WhatsApp Manager
+};
+const ONBOARDING_TEMPLATES: Record<string, string> = {
+  ...DEFAULT_ONBOARDING_TEMPLATES,
+  ...JSON.parse(Deno.env.get("ONBOARDING_TEMPLATES") ?? "{}"),
+};
+
 // All four academy templates have a Flow button at index 0 — Meta returns 131009
 // if flow_token is omitted. Override via FLOW_ACADEMY_IDS env var (JSON array).
 const DEFAULT_FLOW_ACADEMY_IDS = ["utt", "dse", "govsec", "pension"];
@@ -159,7 +172,23 @@ const sendAcademyEntry = async (to: string, academyId: string, lang: Lang): Prom
   return true;
 };
 
-const bot = createBot(store, send, { launchFlow, sendModuleEntry, sendAcademyEntry });
+// Send the onboarding template (Flow button at index 0 → opens the onboarding
+// Flow on its CHOOSE screen). Picks the name by content language, falling back to
+// the EN template. Returns false if no name is mapped (caller can fall back).
+const sendOnboardingEntry = async (to: string, lang: Lang): Promise<boolean> => {
+  const name = ONBOARDING_TEMPLATES[`onboarding-${lang}`] ?? ONBOARDING_TEMPLATES["onboarding-en"];
+  if (!name) return false;
+  await sendFlowTemplate({
+    to,
+    templateName: name,
+    lang,
+    flowToken: `onboarding:${lang}`,
+    screen: "CHOOSE",
+  });
+  return true;
+};
+
+const bot = createBot(store, send, { launchFlow, sendModuleEntry, sendAcademyEntry, sendOnboardingEntry });
 
 const VERIFY_TOKEN = Deno.env.get("WHATSAPP_VERIFY_TOKEN") ?? "wekeza-bot";
 
@@ -168,6 +197,7 @@ log("BOOT", {
   flowEndpointEnabled: Boolean(flowHandler),
   moduleTemplates: Object.keys(MODULE_TEMPLATES).length,
   academyTemplates: Object.keys(ACADEMY_TEMPLATES).length,
+  onboardingTemplates: Object.keys(ONBOARDING_TEMPLATES).length,
   flowIds: Object.keys(FLOW_IDS).length,
   metricsProtected: Boolean(Deno.env.get("METRICS_TOKEN")),
   streamlogia: Boolean(Deno.env.get("STREAMLOGIA_API_KEY") && Deno.env.get("STREAMLOGIA_PROJECT_ID")),

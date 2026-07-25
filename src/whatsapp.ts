@@ -188,7 +188,18 @@ export function parseWebhook(body: any): InboundMessage[] {
             m.interactive?.list_reply?.id;
           if (id) out.push({ from: m.from, text: String(id) });
           else if (m.interactive?.nfm_reply) {
-            out.push({ from: m.from, text: "flow_complete" }); // Flow finished (nfm_reply)
+            // Flow finished (nfm_reply). The response_json echoes the flow_token we
+            // set at launch, so we can tell the onboarding Flow apart from module
+            // Flows and capture the submitted lead (scheme, NIDA, phone, consent…).
+            let token = "";
+            let response = "";
+            try {
+              response = String(m.interactive.nfm_reply.response_json ?? "");
+              token = String(JSON.parse(response || "{}").flow_token ?? "");
+            } catch { /* non-JSON response — treat as a plain flow completion */ }
+            const isOnboarding = token.startsWith("onboarding");
+            if (isOnboarding) log("ONBOARDING_LEAD", { from: m.from, token, response: response.slice(0, 800) });
+            out.push({ from: m.from, text: isOnboarding ? "onboarding_done" : "flow_complete" });
           }
         }
       }

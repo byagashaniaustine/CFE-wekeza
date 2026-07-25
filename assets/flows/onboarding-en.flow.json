@@ -1,0 +1,232 @@
+{
+  "version": "7.3",
+  "routing_model": {
+    "CHOOSE": ["UTT_REGISTER", "DSE_REGISTER", "COMING_SOON"],
+    "UTT_REGISTER": [],
+    "DSE_REGISTER": [],
+    "COMING_SOON": []
+  },
+  "screens": [
+    {
+      "id": "CHOOSE",
+      "title": "Start investing",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "Open your first investment" },
+          { "type": "TextBody", "text": "Choose where to start. With your consent, we help you register with the official provider so they can open your account." },
+          {
+            "type": "RadioButtonsGroup",
+            "name": "scheme",
+            "label": "Choose an option",
+            "required": true,
+            "init-value": "utt",
+            "data-source": [
+              { "id": "utt", "title": "UTT AMIS unit trusts", "description": "Pooled funds, from TZS 10,000" },
+              { "id": "dse", "title": "DSE shares", "description": "Company shares via a licensed broker" },
+              { "id": "govsec", "title": "Government securities", "description": "Treasury bills & bonds" }
+            ]
+          },
+          { "type": "TextCaption", "text": "Education, not financial advice. All options are CMSA-licensed." },
+          {
+            "type": "Switch",
+            "value": "${form.scheme}",
+            "cases": {
+              "utt": [
+                { "type": "Footer", "label": "Continue", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "UTT_REGISTER" }, "payload": { "scheme": "utt" } } }
+              ],
+              "dse": [
+                { "type": "Footer", "label": "Continue", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "DSE_REGISTER" }, "payload": { "scheme": "dse" } } }
+              ],
+              "govsec": [
+                { "type": "Footer", "label": "Continue", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "COMING_SOON" }, "payload": { "scheme": "govsec" } } }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "UTT_REGISTER",
+      "title": "UTT registration",
+      "terminal": true,
+      "success": true,
+      "data": { "scheme": { "type": "string", "__example__": "utt" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "UTT AMIS registration" },
+          { "type": "TextBody", "text": "Fill your registration details. You will finish with a one-time code (OTP), password and PIN on UTT's own secure page." },
+          {
+            "type": "Dropdown",
+            "name": "reg_type",
+            "label": "Registration Type",
+            "required": true,
+            "data-source": [
+              { "id": "new", "title": "New Investor" },
+              { "id": "existing", "title": "Existing Investor" }
+            ]
+          },
+          { "type": "TextCaption", "text": "Choose \"Existing Investor\" if you already have an account." },
+          {
+            "type": "Dropdown",
+            "name": "reg_category",
+            "label": "Registering as",
+            "required": true,
+            "data-source": [
+              { "id": "individual", "title": "Individual" },
+              { "id": "corporate", "title": "Corporate" },
+              { "id": "foreigner", "title": "Foreigner" },
+              { "id": "groups", "title": "Groups and Others" }
+            ]
+          },
+          { "type": "TextCaption", "text": "Choose \"Individual\" for a single and/or joint personal account." },
+          {
+            "type": "TextInput",
+            "name": "nida",
+            "label": "National ID (NIDA Number)",
+            "input-type": "text",
+            "required": true,
+            "helper-text": "Your 20-digit NIDA number",
+            "max-chars": 25
+          },
+          {
+            "type": "TextInput",
+            "name": "phone",
+            "label": "Phone number",
+            "input-type": "phone",
+            "required": true,
+            "helper-text": "UTT sends an OTP here to verify it"
+          },
+          {
+            "type": "OptIn",
+            "name": "consent",
+            "required": true,
+            "label": "I agree to share these details with UTT AMIS so they can help me open my account."
+          },
+          { "type": "TextCaption", "text": "You will enter the OTP and create your password and 4-digit MPIN on UTT's secure page — never share those here." },
+          {
+            "type": "Footer",
+            "label": "Submit",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "scheme": "${data.scheme}",
+                "reg_type": "${form.reg_type}",
+                "reg_category": "${form.reg_category}",
+                "nida": "${form.nida}",
+                "phone": "${form.phone}",
+                "consent": "${form.consent}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "DSE_REGISTER",
+      "title": "DSE registration",
+      "terminal": true,
+      "success": true,
+      "data": { "scheme": { "type": "string", "__example__": "dse" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "DSE registration" },
+          { "type": "TextBody", "text": "To buy shares on the DSE you open a CDS account through a licensed broker. Share your details and a licensed broker will help you set it up." },
+          {
+            "type": "Dropdown",
+            "name": "cds_status",
+            "label": "Do you have a CDS account?",
+            "required": true,
+            "data-source": [
+              { "id": "no", "title": "No, I am new" },
+              { "id": "yes", "title": "Yes, I have one" }
+            ]
+          },
+          {
+            "type": "TextInput",
+            "name": "nida",
+            "label": "National ID (NIDA Number)",
+            "input-type": "text",
+            "required": true,
+            "helper-text": "Your 20-digit NIDA number",
+            "max-chars": 25
+          },
+          {
+            "type": "TextInput",
+            "name": "phone",
+            "label": "Phone number",
+            "input-type": "phone",
+            "required": true,
+            "helper-text": "The broker sends an OTP here to verify it"
+          },
+          {
+            "type": "Dropdown",
+            "name": "route",
+            "label": "How would you like to invest?",
+            "required": true,
+            "data-source": [
+              { "id": "broker", "title": "Through a licensed broker" },
+              { "id": "mobile", "title": "DSE mobile trading" }
+            ]
+          },
+          {
+            "type": "OptIn",
+            "name": "consent",
+            "required": true,
+            "label": "I agree to share these details with a licensed DSE broker so they can help me open my CDS account."
+          },
+          { "type": "TextCaption", "text": "You will verify with an OTP and set any password or PIN on the broker's secure platform — never share those here." },
+          {
+            "type": "Footer",
+            "label": "Submit",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "scheme": "${data.scheme}",
+                "cds_status": "${form.cds_status}",
+                "nida": "${form.nida}",
+                "phone": "${form.phone}",
+                "route": "${form.route}",
+                "consent": "${form.consent}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "COMING_SOON",
+      "title": "Coming soon",
+      "terminal": true,
+      "success": true,
+      "data": { "scheme": { "type": "string", "__example__": "govsec" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "Coming soon" },
+          { "type": "TextBody", "text": "Onboarding for government securities and other options is coming soon. Tick below and we will message you the moment it opens." },
+          {
+            "type": "OptIn",
+            "name": "notify",
+            "required": false,
+            "label": "Notify me when this is available"
+          },
+          {
+            "type": "Footer",
+            "label": "Done",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "scheme": "${data.scheme}",
+                "notify": "${form.notify}"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

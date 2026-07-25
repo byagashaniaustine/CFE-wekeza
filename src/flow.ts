@@ -205,7 +205,16 @@ export function buildModuleFlow(moduleId: string, lang: Lang): unknown | null {
     },
   };
 
-  return { version: "7.3", screens: [...content, done] };
+  // Explicit routing model: Flow Builder requires it whenever screens use
+  // `navigate` actions (auto-generation isn't guaranteed). Linear chain:
+  // SCREEN_A → SCREEN_B → … → last → DONE; DONE terminates.
+  const routing_model: Record<string, string[]> = {};
+  content.forEach((_, i) => {
+    routing_model[sid(i)] = [i === total - 1 ? "DONE" : sid(i + 1)];
+  });
+  routing_model["DONE"] = [];
+
+  return { version: "7.3", routing_model, screens: [...content, done] };
 }
 
 /**

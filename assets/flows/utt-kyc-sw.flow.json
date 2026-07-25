@@ -1,0 +1,111 @@
+{
+  "version": "7.3",
+  "routing_model": { "REGISTER": ["CONTACT"], "CONTACT": [] },
+  "screens": [
+    {
+      "id": "REGISTER",
+      "title": "Usajili wa Mwekezaji",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "Usajili wa Mwekezaji wa UTT AMIS" },
+          { "type": "TextBody", "text": "Anza kufungua akaunti yako ya uwekezaji ya UTT AMIS. Inachukua kama dakika moja. Kwa ridhaa yako tunatuma taarifa hizi kwa UTT AMIS ili wakusaidie kukamilisha." },
+          {
+            "type": "Dropdown",
+            "name": "reg_type",
+            "label": "Aina ya Usajili",
+            "required": true,
+            "data-source": [
+              { "id": "new", "title": "Mwekezaji Mpya" },
+              { "id": "existing", "title": "Mwekezaji Aliyepo" }
+            ]
+          },
+          { "type": "TextCaption", "text": "Chagua \"Mwekezaji Aliyepo\" kama tayari una akaunti." },
+          {
+            "type": "Dropdown",
+            "name": "reg_category",
+            "label": "Unasajili kama",
+            "required": true,
+            "data-source": [
+              { "id": "individual", "title": "Mtu Binafsi" },
+              { "id": "corporate", "title": "Kampuni/Taasisi" },
+              { "id": "foreigner", "title": "Mgeni (Raia wa Kigeni)" },
+              { "id": "groups", "title": "Vikundi na Wengineo" }
+            ]
+          },
+          { "type": "TextCaption", "text": "Chagua \"Mtu Binafsi\" kwa akaunti ya mtu mmoja na/au ya pamoja." },
+          {
+            "type": "TextInput",
+            "name": "nida",
+            "label": "Kitambulisho cha Taifa (Namba ya NIDA)",
+            "input-type": "text",
+            "required": true,
+            "helper-text": "Namba yako ya NIDA yenye tarakimu 20",
+            "max-chars": 25
+          },
+          {
+            "type": "Footer",
+            "label": "Endelea",
+            "on-click-action": {
+              "name": "navigate",
+              "next": { "type": "screen", "name": "CONTACT" },
+              "payload": {
+                "reg_type": "${form.reg_type}",
+                "reg_category": "${form.reg_category}",
+                "nida": "${form.nida}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "CONTACT",
+      "title": "Namba yako ya simu",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "reg_type": { "type": "string", "__example__": "new" },
+        "reg_category": { "type": "string", "__example__": "individual" },
+        "nida": { "type": "string", "__example__": "19900101000000000000" }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "Namba yako ya simu" },
+          { "type": "TextBody", "text": "Tunatumia hii kuunganisha usajili wako. UTT AMIS wanaweza kukupigia ili kukamilisha usajili." },
+          {
+            "type": "TextInput",
+            "name": "phone",
+            "label": "Namba ya simu",
+            "input-type": "phone",
+            "required": true,
+            "helper-text": "mf. +255 7XX XXX XXX"
+          },
+          {
+            "type": "OptIn",
+            "name": "consent",
+            "required": true,
+            "label": "Nakubali kushiriki taarifa hizi na UTT AMIS ili wanisaidie kufungua akaunti yangu."
+          },
+          { "type": "TextCaption", "text": "Utaunda Kitambulisho cha Mtumiaji (User ID), nywila na MPIN ya tarakimu 4 kwenye tovuti salama ya UTT — usishiriki hivyo hapa." },
+          {
+            "type": "Footer",
+            "label": "Wasilisha",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "reg_type": "${data.reg_type}",
+                "reg_category": "${data.reg_category}",
+                "nida": "${data.nida}",
+                "phone": "${form.phone}",
+                "consent": "${form.consent}"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

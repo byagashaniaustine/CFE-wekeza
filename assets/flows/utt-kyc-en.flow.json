@@ -1,0 +1,111 @@
+{
+  "version": "7.3",
+  "routing_model": { "REGISTER": ["CONTACT"], "CONTACT": [] },
+  "screens": [
+    {
+      "id": "REGISTER",
+      "title": "Investor Registration",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "UTT AMIS Investor Registration" },
+          { "type": "TextBody", "text": "Start opening your UTT AMIS investment account. It takes about a minute. With your consent we pass these details to UTT AMIS so they can help you finish." },
+          {
+            "type": "Dropdown",
+            "name": "reg_type",
+            "label": "Registration Type",
+            "required": true,
+            "data-source": [
+              { "id": "new", "title": "New Investor" },
+              { "id": "existing", "title": "Existing Investor" }
+            ]
+          },
+          { "type": "TextCaption", "text": "Choose \"Existing Investor\" if you already have an account." },
+          {
+            "type": "Dropdown",
+            "name": "reg_category",
+            "label": "Registering as",
+            "required": true,
+            "data-source": [
+              { "id": "individual", "title": "Individual" },
+              { "id": "corporate", "title": "Corporate" },
+              { "id": "foreigner", "title": "Foreigner" },
+              { "id": "groups", "title": "Groups and Others" }
+            ]
+          },
+          { "type": "TextCaption", "text": "Choose \"Individual\" for a single and/or joint personal account." },
+          {
+            "type": "TextInput",
+            "name": "nida",
+            "label": "National ID (NIDA Number)",
+            "input-type": "text",
+            "required": true,
+            "helper-text": "Your 20-digit NIDA number",
+            "max-chars": 25
+          },
+          {
+            "type": "Footer",
+            "label": "Proceed",
+            "on-click-action": {
+              "name": "navigate",
+              "next": { "type": "screen", "name": "CONTACT" },
+              "payload": {
+                "reg_type": "${form.reg_type}",
+                "reg_category": "${form.reg_category}",
+                "nida": "${form.nida}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "CONTACT",
+      "title": "Your phone number",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "reg_type": { "type": "string", "__example__": "new" },
+        "reg_category": { "type": "string", "__example__": "individual" },
+        "nida": { "type": "string", "__example__": "19900101000000000000" }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "Your phone number" },
+          { "type": "TextBody", "text": "We use this to link your registration. UTT AMIS may contact you to complete onboarding." },
+          {
+            "type": "TextInput",
+            "name": "phone",
+            "label": "Phone number",
+            "input-type": "phone",
+            "required": true,
+            "helper-text": "e.g. +255 7XX XXX XXX"
+          },
+          {
+            "type": "OptIn",
+            "name": "consent",
+            "required": true,
+            "label": "I agree to share these details with UTT AMIS so they can help me open my account."
+          },
+          { "type": "TextCaption", "text": "You will create your User ID, password and 4-digit MPIN on UTT's own secure portal — never share those here." },
+          {
+            "type": "Footer",
+            "label": "Submit",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "reg_type": "${data.reg_type}",
+                "reg_category": "${data.reg_category}",
+                "nida": "${data.nida}",
+                "phone": "${form.phone}",
+                "consent": "${form.consent}"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

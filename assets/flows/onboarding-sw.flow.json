@@ -1,0 +1,232 @@
+{
+  "version": "7.3",
+  "routing_model": {
+    "CHOOSE": ["UTT_REGISTER", "DSE_REGISTER", "COMING_SOON"],
+    "UTT_REGISTER": [],
+    "DSE_REGISTER": [],
+    "COMING_SOON": []
+  },
+  "screens": [
+    {
+      "id": "CHOOSE",
+      "title": "Anza kuwekeza",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "Fungua uwekezaji wako wa kwanza" },
+          { "type": "TextBody", "text": "Chagua pa kuanzia. Kwa ridhaa yako, tunakusaidia kujisajili na mtoa huduma rasmi ili akufungulie akaunti." },
+          {
+            "type": "RadioButtonsGroup",
+            "name": "scheme",
+            "label": "Chagua chaguo",
+            "required": true,
+            "init-value": "utt",
+            "data-source": [
+              { "id": "utt", "title": "Mifuko ya UTT AMIS", "description": "Mifuko ya pamoja, kuanzia TZS 10,000" },
+              { "id": "dse", "title": "Hisa za DSE", "description": "Hisa za kampuni kupitia dalali mwenye leseni" },
+              { "id": "govsec", "title": "Dhamana za serikali", "description": "Dhamana fupi na hatifungani" }
+            ]
+          },
+          { "type": "TextCaption", "text": "Elimu, si ushauri wa kifedha. Chaguo zote zina leseni ya CMSA." },
+          {
+            "type": "Switch",
+            "value": "${form.scheme}",
+            "cases": {
+              "utt": [
+                { "type": "Footer", "label": "Endelea", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "UTT_REGISTER" }, "payload": { "scheme": "utt" } } }
+              ],
+              "dse": [
+                { "type": "Footer", "label": "Endelea", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "DSE_REGISTER" }, "payload": { "scheme": "dse" } } }
+              ],
+              "govsec": [
+                { "type": "Footer", "label": "Endelea", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "COMING_SOON" }, "payload": { "scheme": "govsec" } } }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "UTT_REGISTER",
+      "title": "Usajili wa UTT",
+      "terminal": true,
+      "success": true,
+      "data": { "scheme": { "type": "string", "__example__": "utt" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "Usajili wa UTT AMIS" },
+          { "type": "TextBody", "text": "Jaza taarifa zako za usajili. Utamalizia kwa msimbo wa mara moja (OTP), nywila na PIN kwenye ukurasa salama wa UTT." },
+          {
+            "type": "Dropdown",
+            "name": "reg_type",
+            "label": "Aina ya Usajili",
+            "required": true,
+            "data-source": [
+              { "id": "new", "title": "Mwekezaji Mpya" },
+              { "id": "existing", "title": "Mwekezaji Aliyepo" }
+            ]
+          },
+          { "type": "TextCaption", "text": "Chagua \"Mwekezaji Aliyepo\" kama tayari una akaunti." },
+          {
+            "type": "Dropdown",
+            "name": "reg_category",
+            "label": "Unasajili kama",
+            "required": true,
+            "data-source": [
+              { "id": "individual", "title": "Mtu Binafsi" },
+              { "id": "corporate", "title": "Kampuni/Taasisi" },
+              { "id": "foreigner", "title": "Mgeni (Raia wa Kigeni)" },
+              { "id": "groups", "title": "Vikundi na Wengineo" }
+            ]
+          },
+          { "type": "TextCaption", "text": "Chagua \"Mtu Binafsi\" kwa akaunti ya mtu mmoja na/au ya pamoja." },
+          {
+            "type": "TextInput",
+            "name": "nida",
+            "label": "Kitambulisho cha Taifa (Namba ya NIDA)",
+            "input-type": "text",
+            "required": true,
+            "helper-text": "Namba yako ya NIDA yenye tarakimu 20",
+            "max-chars": 25
+          },
+          {
+            "type": "TextInput",
+            "name": "phone",
+            "label": "Namba ya simu",
+            "input-type": "phone",
+            "required": true,
+            "helper-text": "UTT atatuma OTP hapa kuithibitisha"
+          },
+          {
+            "type": "OptIn",
+            "name": "consent",
+            "required": true,
+            "label": "Nakubali kushiriki taarifa hizi na UTT AMIS ili wanisaidie kufungua akaunti yangu."
+          },
+          { "type": "TextCaption", "text": "Utaweka OTP na kuunda nywila na MPIN ya tarakimu 4 kwenye ukurasa salama wa UTT — usishiriki hivyo hapa." },
+          {
+            "type": "Footer",
+            "label": "Wasilisha",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "scheme": "${data.scheme}",
+                "reg_type": "${form.reg_type}",
+                "reg_category": "${form.reg_category}",
+                "nida": "${form.nida}",
+                "phone": "${form.phone}",
+                "consent": "${form.consent}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "DSE_REGISTER",
+      "title": "Usajili wa DSE",
+      "terminal": true,
+      "success": true,
+      "data": { "scheme": { "type": "string", "__example__": "dse" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "Usajili wa DSE" },
+          { "type": "TextBody", "text": "Kununua hisa DSE unafungua akaunti ya CDS kupitia dalali mwenye leseni. Toa taarifa zako na dalali mwenye leseni atakusaidia kuifungua." },
+          {
+            "type": "Dropdown",
+            "name": "cds_status",
+            "label": "Je, una akaunti ya CDS?",
+            "required": true,
+            "data-source": [
+              { "id": "no", "title": "Hapana, ni mgeni" },
+              { "id": "yes", "title": "Ndiyo, ninayo" }
+            ]
+          },
+          {
+            "type": "TextInput",
+            "name": "nida",
+            "label": "Kitambulisho cha Taifa (Namba ya NIDA)",
+            "input-type": "text",
+            "required": true,
+            "helper-text": "Namba yako ya NIDA yenye tarakimu 20",
+            "max-chars": 25
+          },
+          {
+            "type": "TextInput",
+            "name": "phone",
+            "label": "Namba ya simu",
+            "input-type": "phone",
+            "required": true,
+            "helper-text": "Dalali atatuma OTP hapa kuithibitisha"
+          },
+          {
+            "type": "Dropdown",
+            "name": "route",
+            "label": "Ungependa kuwekeza vipi?",
+            "required": true,
+            "data-source": [
+              { "id": "broker", "title": "Kupitia dalali mwenye leseni" },
+              { "id": "mobile", "title": "Biashara ya simu ya DSE" }
+            ]
+          },
+          {
+            "type": "OptIn",
+            "name": "consent",
+            "required": true,
+            "label": "Nakubali kushiriki taarifa hizi na dalali wa DSE mwenye leseni ili anisaidie kufungua akaunti yangu ya CDS."
+          },
+          { "type": "TextCaption", "text": "Utathibitisha kwa OTP na kuweka nywila au PIN yoyote kwenye jukwaa salama la dalali — usishiriki hivyo hapa." },
+          {
+            "type": "Footer",
+            "label": "Wasilisha",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "scheme": "${data.scheme}",
+                "cds_status": "${form.cds_status}",
+                "nida": "${form.nida}",
+                "phone": "${form.phone}",
+                "route": "${form.route}",
+                "consent": "${form.consent}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "COMING_SOON",
+      "title": "Inakuja hivi karibuni",
+      "terminal": true,
+      "success": true,
+      "data": { "scheme": { "type": "string", "__example__": "govsec" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "Inakuja hivi karibuni" },
+          { "type": "TextBody", "text": "Usajili wa dhamana za serikali na chaguo nyingine unakuja hivi karibuni. Weka alama hapa chini na tutakutumia ujumbe mara tu utakapofunguliwa." },
+          {
+            "type": "OptIn",
+            "name": "notify",
+            "required": false,
+            "label": "Nijulishe utakapopatikana"
+          },
+          {
+            "type": "Footer",
+            "label": "Sawa",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "scheme": "${data.scheme}",
+                "notify": "${form.notify}"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
