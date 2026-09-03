@@ -10,7 +10,7 @@
 // dispatcher — it does not itself know how a Flow is encrypted or how a template
 // is composed, only which tool to call for the current session state.
 import { DISCLAIMER, type Lang } from "./content.ts";
-import { ACADEMIES, findAcademy, findLevel, findModule, LEVELS, type Loc, type Module } from "./curriculum.ts";
+import { ACADEMIES, findAcademy, findLevel, findModule, LEVELS, type Loc } from "./curriculum.ts";
 import { QUIZ_BANK, quizResult } from "./quiz.ts";
 import { askClaude, claudeEnabled } from "./llm.ts";
 import { log } from "./logger.ts";
@@ -225,20 +225,6 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
         { id: "go_education", title: S.educationMenu[lang] },
         backToModesRow(lang),
       ],
-    });
-  }
-
-  async function sendModuleList(to: string, lang: Lang, modules: Module[], backId: string): Promise<void> {
-    await loggedSend({
-      to,
-      kind: "list",
-      body: S.chooseModule[lang],
-      listButton: S.open[lang],
-      rows: [
-        ...modules.map((m) => ({ id: `mod_${m.id}`, title: m.short[lang] })),
-        { id: backId, title: S.back[lang] },
-        backToModesRow(lang),
-      ].slice(0, 10),
     });
   }
 
