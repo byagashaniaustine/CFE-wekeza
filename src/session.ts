@@ -4,7 +4,7 @@ import { log } from "./logger.ts";
 
 // Top-level mode the user picks up front. Each mode has its own tool surface
 // under src/tools/. `state` below still drives sub-navigation inside the mode.
-export type Mode = "education" | "onboarding" | "simulation";
+export type Mode = "education" | "onboarding" | "simulation" | "ask";
 
 export type BotState =
   | "new"

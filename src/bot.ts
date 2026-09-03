@@ -4,6 +4,7 @@
 //   1. Education  → the existing Learn / Products / Quiz / Ask sub-menu
 //   2. Onboarding → collect data via WhatsApp Flow, submit lead, route to platform URL
 //   3. Simulation → deliver growth-simulation or DSE Scholar challenge template
+//   4. Ask AI     → free-text tutor grounded in the investment curriculum (Claude)
 //
 // Each mode has a dedicated tool surface under src/tools/. This file is the
 // dispatcher — it does not itself know how a Flow is encrypted or how a template
@@ -39,16 +40,18 @@ const S = {
     "Karibu CFE.Wekeza. Chagua unavyotaka kuendelea:",
   ),
   modePickBody: L(
-    "Welcome to CFE.Wekeza. How would you like to proceed?\n\n• Education — read lessons on investing schemes\n• Invest now — start onboarding to a real platform\n• See it grow — try the growth simulation or the DSE Scholar Challenge",
-    "Karibu CFE.Wekeza. Ungependa kuendelea vipi?\n\n• Elimu — soma masomo ya uwekezaji\n• Anza kuwekeza — jisajili kwenye jukwaa halisi\n• Ona ukuaji — jaribu simuleshi au shindano la DSE Scholar",
+    "Welcome to CFE.Wekeza. How would you like to proceed?\n\n• Education — read lessons on investing schemes\n• Invest now — start onboarding to a real platform\n• See it grow — try the growth simulation or the DSE Scholar Challenge\n• Ask AI — free-text tutor on any investing question",
+    "Karibu CFE.Wekeza. Ungependa kuendelea vipi?\n\n• Elimu — soma masomo ya uwekezaji\n• Anza kuwekeza — jisajili kwenye jukwaa halisi\n• Ona ukuaji — jaribu simuleshi au shindano la DSE Scholar\n• Uliza AI — mwalimu wa maswali yoyote ya uwekezaji",
   ),
   open: L("Open", "Fungua"),
   modeEducation: L("Education", "Elimu"),
   modeOnboarding: L("Invest now", "Anza kuwekeza"),
   modeSimulation: L("See it grow", "Ona ukuaji"),
+  modeAsk: L("Ask AI", "Uliza AI"),
   modeEducationDesc: L("Lessons, products, quiz, tutor", "Masomo, bidhaa, jaribio, mwalimu"),
   modeOnboardingDesc: L("Sign up for a real platform", "Jisajili kwa jukwaa halisi"),
   modeSimulationDesc: L("Simulation + DSE Scholar", "Simuleshi + DSE Scholar"),
+  modeAskDesc: L("Any investing question, free text", "Swali lolote la uwekezaji, andika"),
 
   // Education sub-menu labels are owned by tools/education.ts.
   chooseLevel: L(
@@ -171,6 +174,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
         { id: "mode_education", title: S.modeEducation[lang], description: S.modeEducationDesc[lang] },
         { id: "mode_onboarding", title: S.modeOnboarding[lang], description: S.modeOnboardingDesc[lang] },
         { id: "mode_simulation", title: S.modeSimulation[lang], description: S.modeSimulationDesc[lang] },
+        { id: "mode_ask", title: S.modeAsk[lang], description: S.modeAskDesc[lang] },
       ],
     });
   }
@@ -424,6 +428,13 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       log("ROUTE", { branch: "mode_simulation", from });
       await save();
       return await sendSimulationPicker(from, lang, loggedSend);
+    }
+    if (text === "mode_ask") {
+      s.mode = "ask";
+      s.state = "ask";
+      log("ROUTE", { branch: "mode_ask", from });
+      await save();
+      return await say(from, S.askIntro[lang]);
     }
 
     // ── education navigation ──
