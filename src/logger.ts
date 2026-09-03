@@ -39,8 +39,16 @@ export type LogCategory =
   | "SESSION_GET"     // session loaded from store
   | "SESSION_SET"     // session persisted
   // Onboarding (Invest now → Flow → lead capture)
-  | "ONBOARDING_SEND_ERROR" // onboarding template send failed (non-fatal — best-effort follow-up)
-  | "ONBOARDING_LEAD"       // captured user lead from onboarding Flow submission
+  | "ONBOARDING_SEND_ERROR"    // onboarding template send failed (non-fatal — best-effort follow-up)
+  | "ONBOARDING_LEAD"          // captured user lead from onboarding Flow submission
+  | "ONBOARDING_LEAD_SUBMITTED"// normalized lead + optional webhook post outcome (Tool: submitLead)
+  | "ONBOARDING_FAILED"        // onboarding submission failed / malformed — user shown retry
+  | "ONBOARDING_FEEDBACK"      // user tapped 👍/👎 after onboarding
+  | "ONBOARDING_URL_SENT"      // platform onboarding URL delivered to the user
+  // State 3 — growth simulation & DSE Scholar challenge templates
+  | "SIMULATION_TEMPLATE_SENT" // simulation program template delivered
+  | "CHALLENGE_TEMPLATE_SENT"  // DSE scholar challenge template delivered
+  | "SIMULATION_SEND_ERROR"    // simulation/challenge template send failed
   // LLM (both Claude and Gemini use the same categories)
   | "LLM_CALL"        // about to call an LLM (model, tool, chars, history turns)
   | "LLM_REPLY"       // LLM responded successfully (ms, tokens, chars, preview)
@@ -209,6 +217,20 @@ function describe(category: LogCategory, e: Record<string, unknown>): string {
       return `Onboarding template send failed for ${g("to")} (lang=${g("lang")}) — ${clip(g("error"), 200)}`;
     case "ONBOARDING_LEAD":
       return `Onboarding lead captured from ${g("from")} (token=${g("token")}) — ${clip(g("response"), 200)}`;
+    case "ONBOARDING_LEAD_SUBMITTED":
+      return `Onboarding lead submitted for ${g("user")} (scheme=${g("scheme")}) — webhook ${e.webhook ? `HTTP ${g("status")}` : "not configured"}`;
+    case "ONBOARDING_FAILED":
+      return `Onboarding submission failed for ${g("user")} — ${clip(g("reason"), 200)}`;
+    case "ONBOARDING_FEEDBACK":
+      return `${g("user")} left onboarding feedback: ${g("rating")}${has("note") ? ` — "${clip(g("note"), 120)}"` : ""}`;
+    case "ONBOARDING_URL_SENT":
+      return `Sent platform onboarding URL to ${g("user")} (scheme=${g("scheme")})`;
+    case "SIMULATION_TEMPLATE_SENT":
+      return `Sent growth-simulation template '${g("templateName")}' to ${g("to")}`;
+    case "CHALLENGE_TEMPLATE_SENT":
+      return `Sent DSE Scholar challenge template '${g("templateName")}' to ${g("to")}`;
+    case "SIMULATION_SEND_ERROR":
+      return `Simulation/challenge template '${g("templateName")}' failed for ${g("to")} — ${clip(g("error"), 200)}`;
     // ── session store ──────────────────────────────────────────────────────
     case "SESSION_GET":
       return `Loaded session for ${g("user")} (${e.hit ? "cache HIT" : "cache MISS — new session"}, state=${g("state")}, lang=${g("lang") || "unset"}${has("moduleId") ? `, module=${g("moduleId")}` : ""})`;

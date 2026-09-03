@@ -31,35 +31,50 @@ Deno.test("first contact (no greeting) asks for language", async () => {
   assert(sent[0].buttons?.some((b) => b.id === "lang_sw"));
 });
 
-Deno.test("first contact with clear Swahili auto-detects and skips picker", async () => {
+Deno.test("first contact with clear Swahili auto-detects and shows mode picker", async () => {
   const { bot, sent } = setup();
   await bot.handle(USER, "habari za leo rafiki");
-  // Tool 1 detects Swahili → Tool 2 sends welcome menu directly in Swahili
-  const menu = sent.find((m) => m.kind === "list");
-  assert(menu, "welcome menu sent in Swahili without picker");
-  assert(menu!.rows?.some((r) => r.id === "j_learn"), "menu has learn journey");
+  // Tool 1 detects Swahili → picker rendered in Swahili
+  const picker = sent.find((m) => m.kind === "list");
+  assert(picker, "mode picker sent in Swahili without lang prompt");
+  assert(picker!.rows?.some((r) => r.id === "mode_education"), "picker has education mode");
 });
 
-Deno.test("choosing a language shows the 4-journey main menu", async () => {
+Deno.test("choosing a language shows the 3-state mode picker", async () => {
   const { bot, sent } = setup();
   await bot.handle(USER, "lang_en");
-  const menu = sent.find((m) => m.kind === "list");
-  assert(menu, "main menu list sent");
-  const ids = menu!.rows!.map((r) => r.id);
-  assertEquals(ids.length, 4);
+  const picker = sent.find((m) => m.kind === "list");
+  assert(picker, "mode picker list sent");
+  const ids = picker!.rows!.map((r) => r.id);
+  assertEquals(ids.length, 3);
+  assert(
+    ["mode_education", "mode_onboarding", "mode_simulation"].every((id) => ids.includes(id)),
+    `picker rows: ${ids.join(",")}`,
+  );
+});
+
+Deno.test("picking Education reveals the 4-journey sub-menu", async () => {
+  const { bot, sent } = setup();
+  await bot.handle(USER, "lang_en");
+  sent.length = 0;
+  await bot.handle(USER, "mode_education");
+  const menu = last(sent);
+  assertEquals(menu.kind, "list");
+  const ids = menu.rows!.map((r) => r.id);
   assert(["j_learn", "j_products", "j_quiz", "j_ask"].every((id) => ids.includes(id)));
 });
 
 Deno.test("learn → level starts the first module directly (walk)", async () => {
   const { bot, sent } = setup();
   await bot.handle(USER, "lang_en");
+  await bot.handle(USER, "mode_education");
   await bot.handle(USER, "j_learn");
   const levels = last(sent);
   assertEquals(levels.kind, "list");
   assert(levels.rows!.some((r) => r.id === "lvl_beginner"));
 
   sent.length = 0;
-  await bot.handle(USER, "lvl_beginner"); // → presents module 1 directly, no list
+  await bot.handle(USER, "lvl_beginner");
   const screen = last(sent);
   assertEquals(screen.kind, "buttons");
   assert(screen.body.includes("Investing"), `got: ${screen.body}`);
@@ -69,8 +84,9 @@ Deno.test("learn → level starts the first module directly (walk)", async () =>
 Deno.test("walking Next reaches the module completion screen", async () => {
   const { bot, sent } = setup();
   await bot.handle(USER, "lang_en");
+  await bot.handle(USER, "mode_education");
   await bot.handle(USER, "j_learn");
-  await bot.handle(USER, "lvl_beginner"); // starts at basic-concepts (13 screens)
+  await bot.handle(USER, "lvl_beginner");
   for (let i = 0; i < 13; i++) await bot.handle(USER, "scr_next");
   const done = sent.find((m) => m.body.includes("Module complete"));
   assert(done, "completion message sent");
@@ -80,9 +96,10 @@ Deno.test("walking Next reaches the module completion screen", async () => {
 Deno.test("nextmod advances to the next module in the level", async () => {
   const { bot, sent } = setup();
   await bot.handle(USER, "lang_en");
-  await bot.handle(USER, "lvl_beginner"); // basic-concepts
+  await bot.handle(USER, "mode_education");
+  await bot.handle(USER, "lvl_beginner");
   sent.length = 0;
-  await bot.handle(USER, "nextmod"); // → why-invest (module 2)
+  await bot.handle(USER, "nextmod");
   assert(last(sent).body.includes("Importance of Investing"), `got: ${last(sent).body}`);
 });
 
@@ -99,8 +116,9 @@ Deno.test("template module entry is used and Next walks the level", async () => 
     },
   });
   await bot.handle(USER, "lang_en");
-  await bot.handle(USER, "lvl_beginner"); // module 1 template
-  await bot.handle(USER, "nextmod"); // module 2 template
+  await bot.handle(USER, "mode_education");
+  await bot.handle(USER, "lvl_beginner");
+  await bot.handle(USER, "nextmod");
   assertEquals(calls[0], "basic-concepts");
   assertEquals(calls[1], "why-invest");
 });
@@ -108,15 +126,17 @@ Deno.test("template module entry is used and Next walks the level", async () => 
 Deno.test("a coming-soon academy module says so", async () => {
   const { bot, sent } = setup();
   await bot.handle(USER, "lang_en");
+  await bot.handle(USER, "mode_education");
   await bot.handle(USER, "j_products");
   sent.length = 0;
-  await bot.handle(USER, "aca_utt"); // first academy module is coming_soon
+  await bot.handle(USER, "aca_utt");
   assert(sent.some((m) => m.kind === "text" && m.body.toLowerCase().includes("coming soon")));
 });
 
 Deno.test("products shows the academy list", async () => {
   const { bot, sent } = setup();
   await bot.handle(USER, "lang_en");
+  await bot.handle(USER, "mode_education");
   await bot.handle(USER, "j_products");
   const list = last(sent);
   assert(list.rows!.some((r) => r.id === "aca_utt"));
@@ -125,6 +145,7 @@ Deno.test("products shows the academy list", async () => {
 Deno.test("quiz runs through all questions and scores", async () => {
   const { bot, sent } = setup();
   await bot.handle(USER, "lang_en");
+  await bot.handle(USER, "mode_education");
   await bot.handle(USER, "j_quiz");
   for (let i = 0; i < QUIZ_BANK.length; i++) await bot.handle(USER, "ans_0");
   const result = sent.find((m) => m.body.includes(`${QUIZ_BANK.length}/${QUIZ_BANK.length}`));
@@ -134,6 +155,7 @@ Deno.test("quiz runs through all questions and scores", async () => {
 Deno.test("ask journey shows the tutor prompt", async () => {
   const { bot, sent } = setup();
   await bot.handle(USER, "lang_sw");
+  await bot.handle(USER, "mode_education");
   sent.length = 0;
   await bot.handle(USER, "j_ask");
   assert(last(sent).body.toLowerCase().includes("uliza"));

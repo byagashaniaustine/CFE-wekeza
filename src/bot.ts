@@ -1,29 +1,56 @@
 // Conversation engine for CFE.Wekeza.
 //
-// Four journeys from the main menu:
-//   1. Learn Investment      → level → module → lesson screens
-//   2. Investment Products   → academy → module → lesson screens
-//   3. General Quiz          → scored questions + recommendation
-//   4. Ask a Question        → free-text AI tutor (claude.ts)
-import { DISCLAIMER, type Lang, UI } from "./content.ts";
+// Top-level state machine (the "modes" the user picks up front):
+//   1. Education  → the existing Learn / Products / Quiz / Ask sub-menu
+//   2. Onboarding → collect data via WhatsApp Flow, submit lead, route to platform URL
+//   3. Simulation → deliver growth-simulation or DSE Scholar challenge template
+//
+// Each mode has a dedicated tool surface under src/tools/. This file is the
+// dispatcher — it does not itself know how a Flow is encrypted or how a template
+// is composed, only which tool to call for the current session state.
+import { DISCLAIMER, type Lang } from "./content.ts";
 import { ACADEMIES, findAcademy, findLevel, findModule, LEVELS, type Loc, type Module } from "./curriculum.ts";
 import { QUIZ_BANK, quizResult } from "./quiz.ts";
-import { askClaude, claudeEnabled, probeLang } from "./llm.ts";
-import { detectLang } from "./lang_detect.ts";
+import { askClaude, claudeEnabled } from "./llm.ts";
 import { log } from "./logger.ts";
 import type { Session, SessionStore } from "./session.ts";
 import type { Sender } from "./whatsapp.ts";
+import { backToModesRow, detectLang, sendEducationMenu } from "./tools/education.ts";
+import {
+  captureFeedback,
+  handleFailure as handleOnboardingFailure,
+  resolveOnboardingUrl,
+  submitLead,
+} from "./tools/onboarding.ts";
+import {
+  sendChallengeTemplate,
+  sendNotReadyFallback,
+  sendSimulationPicker,
+  sendSimulationTemplate,
+} from "./tools/simulation.ts";
 
 const L = (en: string, sw: string): Loc => ({ en, sw });
 
-// New navigation strings (plain text — no markdown/emoji in body copy).
+// Copy — no markdown/emoji in body copy.
 const S = {
-  mainTitle: L("Welcome to CFE.Wekeza. What would you like to do?", "Karibu CFE.Wekeza. Ungependa kufanya nini?"),
+  // Top-level 3-state picker
+  modePickTitle: L(
+    "Karibu CFE.Wekeza. Chagua unavyotaka kuendelea:",
+    "Karibu CFE.Wekeza. Chagua unavyotaka kuendelea:",
+  ),
+  modePickBody: L(
+    "Welcome to CFE.Wekeza. How would you like to proceed?\n\n• Education — read lessons on investing schemes\n• Invest now — start onboarding to a real platform\n• See it grow — try the growth simulation or the DSE Scholar Challenge",
+    "Karibu CFE.Wekeza. Ungependa kuendelea vipi?\n\n• Elimu — soma masomo ya uwekezaji\n• Anza kuwekeza — jisajili kwenye jukwaa halisi\n• Ona ukuaji — jaribu simuleshi au shindano la DSE Scholar",
+  ),
   open: L("Open", "Fungua"),
-  learn: L("Learn Investment", "Jifunze Uwekezaji"),
-  products: L("Investment Products", "Bidhaa za Uwekezaji"),
-  quiz: L("General Quiz", "Jaribio la Jumla"),
-  ask: L("Ask a Question", "Uliza Swali"),
+  modeEducation: L("Education", "Elimu"),
+  modeOnboarding: L("Invest now", "Anza kuwekeza"),
+  modeSimulation: L("See it grow", "Ona ukuaji"),
+  modeEducationDesc: L("Lessons, products, quiz, tutor", "Masomo, bidhaa, jaribio, mwalimu"),
+  modeOnboardingDesc: L("Sign up for a real platform", "Jisajili kwa jukwaa halisi"),
+  modeSimulationDesc: L("Simulation + DSE Scholar", "Simuleshi + DSE Scholar"),
+
+  // Education sub-menu labels are owned by tools/education.ts.
   chooseLevel: L(
     "Each level guides you through structured lessons. Start at Beginner and progress at your own pace.",
     "Kila kiwango kinakupeleka kupitia masomo yaliyopangwa. Anza Mwanzo na upige hatua kwa kasi yako.",
@@ -37,7 +64,8 @@ const S = {
     "Jifunza jinsi kila bidhaa ya uwekezaji inavyofanya kazi Tanzania — kuanzia mifuko hadi pensheni. Chagua moja.",
   ),
   back: L("Back", "Rudi"),
-  mainMenu: L("Main menu", "Menyu kuu"),
+  backModes: L("Back to modes", "Rudi kwenye hali"),
+  educationMenu: L("Education menu", "Menyu ya elimu"),
   comingSoon: L(
     "This module is coming soon — more lessons are on the way. Meanwhile, explore the modules that are ready, or ask the tutor a question.",
     "Moduli hii inakuja hivi karibuni — masomo zaidi yanakuja. Kwa sasa, jaribu moduli zilizopo, au uliza mwalimu swali.",
@@ -50,7 +78,6 @@ const S = {
   nextModule: L("Next module", "Moduli ifuatayo"),
   levelDone: L("You have completed this level. Well done!", "Umekamilisha kiwango hiki. Hongera!"),
   takeQuiz: L("Take quiz", "Fanya jaribio"),
-  moreModules: L("More modules", "Moduli zaidi"),
   quizIntro: L("General Quiz — reply A, B or C.", "Jaribio — jibu A, B au C."),
   correct: L("Correct.", "Sahihi."),
   wrong: L("Not quite.", "Sio sahihi."),
@@ -63,6 +90,16 @@ const S = {
     "Thank you. We have received your details and will help you get started — you'll get a message shortly.",
     "Asante. Tumepokea taarifa zako na tutakusaidia kuanza — utapokea ujumbe hivi karibuni.",
   ),
+  continueHere: L("Continue your registration here:", "Endelea usajili wako hapa:"),
+  feedbackAsk: L("How was that experience?", "Uzoefu ulikuwaje?"),
+  feedbackUp: L("Good", "Nzuri"),
+  feedbackDown: L("Not good", "Sio nzuri"),
+  feedbackThanks: L("Thanks for the feedback.", "Asante kwa maoni yako."),
+  pickLang: L(
+    "Chagua lugha / Choose your language:",
+    "Chagua lugha / Choose your language:",
+  ),
+  langSet: L("Language set to English", "Lugha imewekwa: Kiswahili"),
 };
 
 const NAV_WORDS = ["menu", "menyu", "main", "start", "anza"];
@@ -72,16 +109,10 @@ const QUIZ_WORDS = ["quiz", "jaribio"];
 const LANG_WORDS = ["lang", "lugha", "language"];
 
 export interface BotOptions {
-  // Open a module as a native WhatsApp Flow. Returns true if launched, false to
-  // fall back to message screens (e.g. no published Flow id for this module).
   launchFlow?: (to: string, moduleId: string, lang: Lang) => Promise<boolean>;
-  // Send a module as a pre-approved WhatsApp template (Flow button + Next quick-reply).
-  // Returns true if a template was sent, false to fall back to Flow/message screens.
   sendModuleEntry?: (to: string, moduleId: string, lang: Lang) => Promise<boolean>;
-  // Send a product-academy as its approved template. Returns true if sent.
   sendAcademyEntry?: (to: string, academyId: string, lang: Lang) => Promise<boolean>;
-  // Send the onboarding ("Invest now") template — Flow button opens the onboarding
-  // Flow (CHOOSE → UTT/DSE/coming-soon). Returns true if sent.
+  // Onboarding: fires the "Invest now" Flow template (CHOOSE → UTT/DSE/coming-soon).
   sendOnboardingEntry?: (to: string, lang: Lang) => Promise<boolean>;
 }
 
@@ -101,24 +132,12 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
 
   const say = (to: string, body: string) => loggedSend({ to, kind: "text", body });
 
-  // Fire the onboarding ("Invest now") template as an extra prompt. Best-effort:
-  // a template error (e.g. name not yet approved) must never break the menu or
-  // completion message it follows.
-  async function offerOnboarding(to: string, lang: Lang): Promise<void> {
-    if (!sendOnboardingEntry) return;
-    try {
-      await sendOnboardingEntry(to, lang);
-    } catch (err) {
-      log("ONBOARDING_SEND_ERROR", { to, lang, error: String(err) });
-    }
-  }
-
   // ── module sequencing for the linear level/academy walk ─────────────────────
   function currentGroup(s: Session) {
     if (s.academyId) return findAcademy(s.academyId);
     if (s.levelId) return findLevel(s.levelId);
     return undefined;
-  } 
+  }
   function setGroupFor(s: Session, moduleId: string): void {
     for (const lv of LEVELS) {
       if (lv.modules.some((m) => m.id === moduleId)) { s.levelId = lv.id; s.academyId = null; return; }
@@ -137,35 +156,35 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
     const btns: { id: string; title: string }[] = [];
     if (nextModuleId(s)) btns.push({ id: "nextmod", title: S.nextModule[lang] });
     btns.push({ id: "go_quiz", title: S.takeQuiz[lang] });
-    btns.push({ id: "go_main", title: S.mainMenu[lang] });
+    btns.push({ id: "go_modes", title: S.backModes[lang] });
     return btns.slice(0, 3);
   }
 
-  // ── menu senders ──────────────────────────────────────────────────────────
-  async function sendLangPicker(to: string): Promise<void> {
-    await loggedSend({
-      to,
-      kind: "buttons",
-      body: `${UI.welcome.sw.split("\n")[0]}\n\n${UI.pickLang.en}`,
-      buttons: [{ id: "lang_sw", title: "Kiswahili" }, { id: "lang_en", title: "English" }],
-    });
-  }
-
-  async function sendMainMenu(to: string, lang: Lang): Promise<void> {
+  // ── mode picker (top-level 3-state chooser) ─────────────────────────────────
+  async function sendModePicker(to: string, lang: Lang): Promise<void> {
     await loggedSend({
       to,
       kind: "list",
-      body: UI.welcome[lang],
+      body: S.modePickBody[lang],
       listButton: S.open[lang],
       rows: [
-        { id: "j_learn", title: S.learn[lang] },
-        { id: "j_products", title: S.products[lang] },
-        { id: "j_quiz", title: S.quiz[lang] },
-        { id: "j_ask", title: S.ask[lang] },
+        { id: "mode_education", title: S.modeEducation[lang], description: S.modeEducationDesc[lang] },
+        { id: "mode_onboarding", title: S.modeOnboarding[lang], description: S.modeOnboardingDesc[lang] },
+        { id: "mode_simulation", title: S.modeSimulation[lang], description: S.modeSimulationDesc[lang] },
       ],
     });
   }
 
+  async function sendLangPicker(to: string): Promise<void> {
+    await loggedSend({
+      to,
+      kind: "buttons",
+      body: S.pickLang.en,
+      buttons: [{ id: "lang_sw", title: "Kiswahili" }, { id: "lang_en", title: "English" }],
+    });
+  }
+
+  // ── education sub-menus ─────────────────────────────────────────────────────
   async function sendLevels(to: string, lang: Lang): Promise<void> {
     const desc: Record<string, Loc> = {
       beginner:     L("First steps — what investing is and why it matters", "Hatua za kwanza — uwekezaji ni nini na kwa nini"),
@@ -179,7 +198,8 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       listButton: S.open[lang],
       rows: [
         ...LEVELS.map((lv) => ({ id: `lvl_${lv.id}`, title: lv.short[lang], description: desc[lv.id]?.[lang] })),
-        { id: "go_main", title: S.mainMenu[lang] },
+        { id: "go_education", title: S.educationMenu[lang] },
+        backToModesRow(lang),
       ],
     });
   }
@@ -198,7 +218,8 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       listButton: S.open[lang],
       rows: [
         ...ACADEMIES.map((a) => ({ id: `aca_${a.id}`, title: a.short[lang], description: desc[a.id]?.[lang] })),
-        { id: "go_main", title: S.mainMenu[lang] },
+        { id: "go_education", title: S.educationMenu[lang] },
+        backToModesRow(lang),
       ],
     });
   }
@@ -212,27 +233,15 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       rows: [
         ...modules.map((m) => ({ id: `mod_${m.id}`, title: m.short[lang] })),
         { id: backId, title: S.back[lang] },
-        { id: "go_main", title: S.mainMenu[lang] },
+        backToModesRow(lang),
       ].slice(0, 10),
     });
-  }
-
-  async function reshowModules(to: string, s: Session, lang: Lang): Promise<void> {
-    if (s.academyId) {
-      const a = findAcademy(s.academyId);
-      if (a) return await sendModuleList(to, lang, a.modules, "go_products");
-    }
-    if (s.levelId) {
-      const lv = findLevel(s.levelId);
-      if (lv) return await sendModuleList(to, lang, lv.modules, "go_learn");
-    }
-    await sendMainMenu(to, lang);
   }
 
   // ── module screen delivery (message engine) ─────────────────────────────────
   async function sendScreen(to: string, s: Session, lang: Lang): Promise<void> {
     const m = findModule(s.moduleId ?? "");
-    if (!m) return await sendMainMenu(to, lang);
+    if (!m) return await sendEducationMenu(to, lang, loggedSend);
     const lesson = m.lessons[s.lessonIdx];
     const screen = lesson.screens[s.screenIdx];
     const total = m.lessons.reduce((n, l) => n + l.screens.length, 0);
@@ -241,11 +250,11 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
 
     const body = `${lesson.title[lang]}  (${pos}/${total})\n\n${screen.body[lang]}`;
     const buttons = first
-      ? [{ id: "scr_next", title: S.next[lang] }, { id: "go_main", title: S.menu[lang] }]
+      ? [{ id: "scr_next", title: S.next[lang] }, { id: "go_modes", title: S.menu[lang] }]
       : [
         { id: "scr_prev", title: S.prev[lang] },
         { id: "scr_next", title: S.next[lang] },
-        { id: "go_main", title: S.menu[lang] },
+        { id: "go_modes", title: S.menu[lang] },
       ];
     await loggedSend({ to, kind: "buttons", body, buttons });
   }
@@ -259,14 +268,11 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       body: `${head}${S.moduleDone[lang]}\n\n${DISCLAIMER[lang]}`,
       buttons: moduleNavButtons(s, lang),
     });
-    await offerOnboarding(to, lang); // prompt to invest every time a module finishes
   }
 
-  // Present a module: approved template (Flow + Next) if available, else native
-  // Flow, else walk its screens as messages. Drives both direct opens and the walk.
   async function presentModule(to: string, s: Session, id: string, lang: Lang): Promise<void> {
     const m = findModule(id);
-    if (!m) return await sendMainMenu(to, lang);
+    if (!m) return await sendEducationMenu(to, lang, loggedSend);
     setGroupFor(s, id);
     s.state = "module";
     s.moduleId = id;
@@ -277,9 +283,9 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       await loggedSend({ to, kind: "buttons", body: S.whatNext[lang], buttons: moduleNavButtons(s, lang) });
       return;
     }
-    if (sendModuleEntry && await sendModuleEntry(to, id, lang)) return; // approved template (Flow + Next baked in)
-    if (launchFlow && await launchFlow(to, id, lang)) return; // native Flow fallback
-    await sendScreen(to, s, lang); // message-screen fallback
+    if (sendModuleEntry && await sendModuleEntry(to, id, lang)) return;
+    if (launchFlow && await launchFlow(to, id, lang)) return;
+    await sendScreen(to, s, lang);
   }
 
   function advance(s: Session, dir: 1 | -1): "screen" | "done" | "first" {
@@ -317,6 +323,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
 
   async function startQuiz(to: string, s: Session, lang: Lang): Promise<void> {
     s.state = "quiz";
+    s.mode = "education";
     s.quizIdx = 0;
     s.score = 0;
     s.quizWrong = [];
@@ -325,62 +332,61 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
   }
 
   // ── main handler ──────────────────────────────────────────────────────────
-  async function handle(from: string, raw: string): Promise<void> {
+  async function handle(from: string, raw: string, meta: { flowData?: Record<string, unknown> } = {}): Promise<void> {
     log("INCOMING", { from, text: raw.slice(0, 300) });
     const s = await store.get(from);
     const text = raw.trim().toLowerCase();
     const save = () => store.set(from, s);
 
-    // Language commands work anywhere.
+    // ── language commands work anywhere ──
     if (text === "lang_sw" || text === "lang_en") {
       s.lang = text === "lang_sw" ? "sw" : "en";
-      s.state = "menu";
+      s.state = "mode_pick";
+      s.mode = null;
       log("ROUTE", { branch: "lang_pick", lang: s.lang, from });
       await save();
-      await say(from, UI.langSet[s.lang]);
-      await sendMainMenu(from, s.lang);
+      await say(from, S.langSet[s.lang]);
+      await sendModePicker(from, s.lang);
       return;
     }
     if (LANG_WORDS.includes(text)) return await sendLangPicker(from);
 
-    // Greeting detects language and resets to the main menu.
+    // ── greeting: detect language, reset to mode picker ──
     const isSw = SW_GREET.includes(text);
     const isEn = EN_GREET.includes(text);
     if (isSw || isEn) {
       s.lang = isSw ? "sw" : "en";
-      s.state = "menu";
+      s.state = "mode_pick";
+      s.mode = null;
       await save();
-      await sendMainMenu(from, s.lang);
-      await offerOnboarding(from, s.lang); // prompt to invest every time a user greets
+      await sendModePicker(from, s.lang);
       return;
     }
 
-    // First contact, no language set yet.
-    // Tool 1: detect language from user's message.
-    // Tool 2: if detection is confident, respond in that language immediately;
-    //         otherwise fall back to the manual language picker.
+    // ── first contact, no language set yet ──
     if (!s.lang) {
       const { lang: detected, confident } = await detectLang(raw);
       if (confident) {
         s.lang = detected;
-        s.state = "menu";
+        s.state = "mode_pick";
+        s.mode = null;
         await save();
-        await sendMainMenu(from, s.lang);
+        await sendModePicker(from, s.lang);
         return;
       }
-      // Ambiguous input — ask explicitly.
       await sendLangPicker(from);
       await save();
       return;
     }
     const lang = s.lang;
 
-    // Global: back to main menu.
-    if (NAV_WORDS.includes(text)) {
-      s.state = "menu";
+    // ── global nav ──
+    if (NAV_WORDS.includes(text) || text === "go_modes") {
+      s.state = "mode_pick";
+      s.mode = null;
+      log("ROUTE", { branch: "mode_pick", from });
       await save();
-      await sendMainMenu(from, lang);
-      return;
+      return await sendModePicker(from, lang);
     }
     if (QUIZ_WORDS.includes(text)) {
       await startQuiz(from, s, lang);
@@ -388,14 +394,54 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       return;
     }
 
-    // ── id-based routing (buttons / list rows) ──
+    // ── mode selection (top-level) ──
+    if (text === "mode_education") {
+      s.mode = "education";
+      s.state = "menu";
+      log("ROUTE", { branch: "mode_education", from });
+      await save();
+      return await sendEducationMenu(from, lang, loggedSend);
+    }
+    if (text === "mode_onboarding") {
+      s.mode = "onboarding";
+      s.state = "menu";
+      log("ROUTE", { branch: "mode_onboarding", from });
+      await save();
+      if (sendOnboardingEntry) {
+        try {
+          const ok = await sendOnboardingEntry(from, lang);
+          if (ok) return;
+        } catch (err) {
+          log("ONBOARDING_SEND_ERROR", { to: from, lang, error: String(err) });
+        }
+      }
+      // Onboarding template not configured — surface a graceful failure.
+      return await handleOnboardingFailure(from, "no_template", lang, loggedSend);
+    }
+    if (text === "mode_simulation") {
+      s.mode = "simulation";
+      s.state = "simulation_pick";
+      log("ROUTE", { branch: "mode_simulation", from });
+      await save();
+      return await sendSimulationPicker(from, lang, loggedSend);
+    }
+
+    // ── education navigation ──
+    if (text === "go_education") {
+      s.mode = "education";
+      s.state = "menu";
+      await save();
+      return await sendEducationMenu(from, lang, loggedSend);
+    }
     if (text === "j_learn" || text === "go_learn") {
+      s.mode = "education";
       s.state = "learn_levels";
       log("ROUTE", { branch: "learn_levels", from });
       await save();
       return await sendLevels(from, lang);
     }
     if (text === "j_products" || text === "go_products") {
+      s.mode = "education";
       s.state = "products";
       log("ROUTE", { branch: "products", from });
       await save();
@@ -408,45 +454,78 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       return;
     }
     if (text === "j_ask") {
+      s.mode = "education";
       s.state = "ask";
       log("ROUTE", { branch: "ask_intro", from });
       await save();
       return await say(from, S.askIntro[lang]);
     }
-    if (text === "go_main") {
-      s.state = "menu";
-      log("ROUTE", { branch: "main_menu", from });
-      await save();
-      return await sendMainMenu(from, lang);
-    }
-    // WhatsApp Flow completion — nfm_reply arrives as "flow_complete".
-    // The session already has moduleId/levelId set from when the Flow was launched,
-    // so surface the post-module navigation (next module / quiz / menu).
+
+    // ── flow completions ──
     if (text === "flow_complete") {
       log("ROUTE", { branch: "flow_complete", from, moduleId: s.moduleId });
-      if (s.moduleId) {
-        await sendCompletion(from, s, lang);
-      } else {
-        await sendMainMenu(from, lang);
-      }
+      if (s.moduleId) await sendCompletion(from, s, lang);
+      else await sendModePicker(from, lang);
       await save();
       return;
     }
-    // Onboarding Flow completion — the lead was captured inside the Flow (logged by
-    // parseWebhook). Acknowledge and return to the menu; do NOT treat as a module
-    // completion and do NOT re-offer onboarding here.
     if (text === "onboarding_done") {
       log("ROUTE", { branch: "onboarding_done", from });
-      s.state = "menu";
+      const raw = meta.flowData ?? {};
+      const result = await submitLead(from, raw, lang);
+      if (!result.ok) {
+        await save();
+        return await handleOnboardingFailure(from, result.error ?? "submit_failed", lang, loggedSend);
+      }
+      s.lastLeadScheme = result.lead.scheme;
+      s.state = "onboarding_done";
       await save();
       await say(from, S.onboardingThanks[lang]);
-      await sendMainMenu(from, lang);
+      const url = resolveOnboardingUrl(result.lead.scheme);
+      if (url) {
+        await say(from, `${S.continueHere[lang]} ${url}`);
+        log("ONBOARDING_URL_SENT", { user: from, scheme: result.lead.scheme, url });
+      }
+      await loggedSend({
+        to: from,
+        kind: "buttons",
+        body: S.feedbackAsk[lang],
+        buttons: [
+          { id: "fb_up", title: S.feedbackUp[lang] },
+          { id: "fb_down", title: S.feedbackDown[lang] },
+          { id: "go_modes", title: S.backModes[lang] },
+        ],
+      });
       return;
     }
+    if (text === "fb_up" || text === "fb_down") {
+      captureFeedback(from, text === "fb_up" ? "up" : "down");
+      await say(from, S.feedbackThanks[lang]);
+      s.state = "mode_pick";
+      s.mode = null;
+      await save();
+      return await sendModePicker(from, lang);
+    }
+
+    // ── simulation buttons ──
+    if (text === "sim_growth") {
+      const ok = await sendSimulationTemplate(from, lang);
+      if (!ok) await sendNotReadyFallback(from, lang, loggedSend);
+      await save();
+      return;
+    }
+    if (text === "sim_challenge") {
+      const ok = await sendChallengeTemplate(from, lang);
+      if (!ok) await sendNotReadyFallback(from, lang, loggedSend);
+      await save();
+      return;
+    }
+
+    // ── level / academy / module routing ──
     if (text.startsWith("lvl_")) {
       const lv = findLevel(text.slice(4));
       if (lv && lv.modules.length) {
-        await presentModule(from, s, lv.modules[0].id, lang); // start the level walk at module 1
+        await presentModule(from, s, lv.modules[0].id, lang);
         await save();
         return;
       }
@@ -469,7 +548,6 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
         }
       }
     }
-    // Next module in the current level/academy (template Next quick-reply payload, or message button).
     if (text === "nextmod" || text === "go_nextmod") {
       const nid = nextModuleId(s);
       if (nid) {
@@ -480,7 +558,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
           to: from,
           kind: "buttons",
           body: S.whatNext[lang],
-          buttons: [{ id: "go_quiz", title: S.takeQuiz[lang] }, { id: "go_main", title: S.mainMenu[lang] }],
+          buttons: [{ id: "go_quiz", title: S.takeQuiz[lang] }, { id: "go_modes", title: S.backModes[lang] }],
         });
       }
       await save();
@@ -542,7 +620,10 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
             to: from,
             kind: "buttons",
             body: S.moduleDone[lang],
-            buttons: [{ id: "j_learn", title: S.learn[lang] }, { id: "go_main", title: S.mainMenu[lang] }],
+            buttons: [
+              { id: "mode_education", title: S.modeEducation[lang] },
+              { id: "go_modes", title: S.backModes[lang] },
+            ],
           });
           s.state = "menu";
         } else {

@@ -169,6 +169,9 @@ function toPayload(msg: OutboundMessage): Record<string, unknown> {
 export interface InboundMessage {
   from: string;
   text: string; // normalised: body text, button id, or list row id
+  // Populated only for Flow completions (nfm_reply) — the parsed response_json
+  // so downstream handlers (submitLead) don't have to re-parse.
+  flowData?: Record<string, unknown>;
 }
 
 // deno-lint-ignore no-explicit-any
@@ -193,13 +196,19 @@ export function parseWebhook(body: any): InboundMessage[] {
             // Flows and capture the submitted lead (scheme, NIDA, phone, consent…).
             let token = "";
             let response = "";
+            let parsed: Record<string, unknown> | undefined;
             try {
               response = String(m.interactive.nfm_reply.response_json ?? "");
-              token = String(JSON.parse(response || "{}").flow_token ?? "");
+              parsed = response ? JSON.parse(response) : {};
+              token = String(parsed?.flow_token ?? "");
             } catch { /* non-JSON response — treat as a plain flow completion */ }
             const isOnboarding = token.startsWith("onboarding");
             if (isOnboarding) log("ONBOARDING_LEAD", { from: m.from, token, response: response.slice(0, 800) });
-            out.push({ from: m.from, text: isOnboarding ? "onboarding_done" : "flow_complete" });
+            out.push({
+              from: m.from,
+              text: isOnboarding ? "onboarding_done" : "flow_complete",
+              ...(isOnboarding && parsed ? { flowData: parsed } : {}),
+            });
           }
         }
       }

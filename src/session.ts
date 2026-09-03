@@ -2,19 +2,27 @@
 import type { Lang } from "./content.ts";
 import { log } from "./logger.ts";
 
+// Top-level mode the user picks up front. Each mode has its own tool surface
+// under src/tools/. `state` below still drives sub-navigation inside the mode.
+export type Mode = "education" | "onboarding" | "simulation";
+
 export type BotState =
   | "new"
-  | "menu" // main menu (4 journeys)
+  | "mode_pick" // the 3-state picker (Education / Onboarding / Simulation)
+  | "menu" // education sub-menu (Learn / Products / Quiz / Ask)
   | "learn_levels" // choosing Beginner/Intermediate/Advanced
   | "learn_modules" // choosing a module within a level
   | "products" // choosing a product academy
   | "products_modules" // choosing a module within an academy
   | "module" // inside a module, walking lesson screens
   | "quiz"
-  | "ask"; // free-text tutor mode
+  | "ask" // free-text tutor mode
+  | "onboarding_done" // waiting for post-onboarding feedback (👍/👎)
+  | "simulation_pick"; // choosing simulation vs DSE challenge
 
 export interface Session {
   lang: Lang | null; // null = not chosen yet
+  mode: Mode | null; // null = not chosen yet — show mode picker
   state: BotState;
   levelId: string | null; // current level (learn path)
   academyId: string | null; // current academy (products path)
@@ -25,10 +33,12 @@ export interface Session {
   score: number;
   quizWrong: string[]; // topics answered incorrectly (for recommendations)
   history: Array<{ role: "user" | "assistant"; content: string }>;
+  lastLeadScheme: string | null; // last onboarding scheme (utt/dse/govsec/pension) — for feedback + URL routing
 }
 
 export const freshSession = (): Session => ({
   lang: null,
+  mode: null,
   state: "new",
   levelId: null,
   academyId: null,
@@ -39,6 +49,7 @@ export const freshSession = (): Session => ({
   score: 0,
   quizWrong: [],
   history: [],
+  lastLeadScheme: null,
 });
 
 export interface SessionStore {
@@ -77,6 +88,7 @@ export async function createKvStore(): Promise<SessionStore> {
       log("SESSION_SET", {
         user: u,
         state: s.state,
+        mode: s.mode,
         lang: s.lang,
         moduleId: s.moduleId,
         lessonIdx: s.lessonIdx,

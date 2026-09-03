@@ -199,6 +199,9 @@ log("BOOT", {
   academyTemplates: Object.keys(ACADEMY_TEMPLATES).length,
   onboardingTemplates: Object.keys(ONBOARDING_TEMPLATES).length,
   flowIds: Object.keys(FLOW_IDS).length,
+  simulationTemplate: Boolean(Deno.env.get("SIMULATION_TEMPLATE_NAME")),
+  challengeTemplate: Boolean(Deno.env.get("DSE_CHALLENGE_TEMPLATE_NAME")),
+  leadWebhook: Boolean(Deno.env.get("LEAD_WEBHOOK_URL")),
   metricsProtected: Boolean(Deno.env.get("METRICS_TOKEN")),
   streamlogia: Boolean(Deno.env.get("STREAMLOGIA_API_KEY") && Deno.env.get("STREAMLOGIA_PROJECT_ID")),
 });
@@ -298,7 +301,9 @@ app.post("/webhook", async (c) => {
   const body = await c.req.json().catch(() => null);
   const messages = parseWebhook(body);
   log("WEBHOOK_POST", { messages: messages.length, hasBody: !!body });
-  const tasks = messages.map((m) => enqueue(m.from, () => bot.handle(m.from, m.text)));
+  const tasks = messages.map((m) =>
+    enqueue(m.from, () => bot.handle(m.from, m.text, { flowData: m.flowData })),
+  );
   await Promise.allSettled(tasks);
   await flushLogs();
   return c.json({ ok: true });
