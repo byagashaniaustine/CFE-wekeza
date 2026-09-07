@@ -45,6 +45,8 @@ export type LogCategory =
   | "ONBOARDING_FAILED"        // onboarding submission failed / malformed — user shown retry
   | "ONBOARDING_FEEDBACK"      // user tapped 👍/👎 after onboarding
   | "ONBOARDING_URL_SENT"      // platform onboarding URL delivered to the user
+  | "ONBOARDING_INTENT"        // user triggered onboarding via free text (e.g. "Nataka kuwekeza")
+  | "ONBOARDING_PLATFORM_PICKED" // user chose UTT / DSE / govsec from the platform picker
   // State 3 — growth simulation & DSE Scholar challenge templates
   | "SIMULATION_TEMPLATE_SENT" // simulation program template delivered
   | "CHALLENGE_TEMPLATE_SENT"  // DSE scholar challenge template delivered
@@ -225,6 +227,10 @@ function describe(category: LogCategory, e: Record<string, unknown>): string {
       return `${g("user")} left onboarding feedback: ${g("rating")}${has("note") ? ` — "${clip(g("note"), 120)}"` : ""}`;
     case "ONBOARDING_URL_SENT":
       return `Sent platform onboarding URL to ${g("user")} (scheme=${g("scheme")})`;
+    case "ONBOARDING_INTENT":
+      return `${g("from")} signalled intent to invest ("${clip(g("text"), 80)}") — routing to platform picker`;
+    case "ONBOARDING_PLATFORM_PICKED":
+      return `${g("user")} picked platform ${g("scheme")} — launching onboarding template`;
     case "SIMULATION_TEMPLATE_SENT":
       return `Sent growth-simulation template '${g("templateName")}' to ${g("to")}`;
     case "CHALLENGE_TEMPLATE_SENT":

@@ -50,29 +50,78 @@ Deno.test("mode_ask shows the tutor intro in Swahili when lang=sw", async () => 
   assert(msg.body.toLowerCase().includes("uliza"), `got: ${msg.body}`);
 });
 
-Deno.test("mode_onboarding fires sendOnboardingEntry", async () => {
-  const calls: string[] = [];
+Deno.test("mode_onboarding opens the platform picker (list of 3 + back)", async () => {
+  const { bot, sent } = setup();
+  await bot.handle(USER, "lang_en");
+  sent.length = 0;
+  await bot.handle(USER, "mode_onboarding");
+  const picker = last(sent);
+  assertEquals(picker.kind, "list");
+  const ids = picker.rows!.map((r) => r.id);
+  assert(ids.includes("plat_utt"));
+  assert(ids.includes("plat_dse"));
+  assert(ids.includes("plat_govsec"));
+  assert(ids.includes("go_modes"));
+});
+
+Deno.test("plat_utt fires sendOnboardingEntry with scheme=utt", async () => {
+  const calls: Array<{ to: string; lang: string; scheme?: string }> = [];
   const { bot } = setup({
-    sendOnboardingEntry: (to) => {
-      calls.push(to);
+    sendOnboardingEntry: (to, lang, scheme) => {
+      calls.push({ to, lang, scheme });
       return Promise.resolve(true);
     },
   });
   await bot.handle(USER, "lang_en");
   await bot.handle(USER, "mode_onboarding");
+  await bot.handle(USER, "plat_utt");
   assertEquals(calls.length, 1);
-  assertEquals(calls[0], USER);
+  assertEquals(calls[0].scheme, "utt");
 });
 
-Deno.test("mode_onboarding shows failure retry when no template configured", async () => {
+Deno.test("plat_dse fires sendOnboardingEntry with scheme=dse", async () => {
+  const calls: Array<{ scheme?: string }> = [];
+  const { bot } = setup({
+    sendOnboardingEntry: (_to, _lang, scheme) => {
+      calls.push({ scheme });
+      return Promise.resolve(true);
+    },
+  });
+  await bot.handle(USER, "lang_en");
+  await bot.handle(USER, "mode_onboarding");
+  await bot.handle(USER, "plat_dse");
+  assertEquals(calls[0].scheme, "dse");
+});
+
+Deno.test("platform picker shows failure retry when template unset", async () => {
   const { bot, sent } = setup(); // no sendOnboardingEntry
   await bot.handle(USER, "lang_en");
-  sent.length = 0;
   await bot.handle(USER, "mode_onboarding");
+  sent.length = 0;
+  await bot.handle(USER, "plat_utt");
   const msg = last(sent);
   assertEquals(msg.kind, "buttons");
-  assert(msg.buttons?.some((b) => b.id === "mode_onboarding"), "retry button present");
-  assert(msg.buttons?.some((b) => b.id === "go_modes"), "back-to-modes present");
+  assert(msg.buttons?.some((b) => b.id === "mode_onboarding"), "retry present");
+});
+
+Deno.test("'nataka kuwekeza' free-text triggers the platform picker", async () => {
+  const { bot, sent } = setup();
+  await bot.handle(USER, "lang_sw");
+  sent.length = 0;
+  await bot.handle(USER, "Nataka kuwekeza");
+  const picker = last(sent);
+  assertEquals(picker.kind, "list");
+  assert(picker.rows?.some((r) => r.id === "plat_utt"));
+});
+
+Deno.test("'I want to invest' free-text triggers the platform picker", async () => {
+  const { bot, sent } = setup();
+  await bot.handle(USER, "lang_en");
+  sent.length = 0;
+  await bot.handle(USER, "I want to invest");
+  const picker = last(sent);
+  assertEquals(picker.kind, "list");
+  assert(picker.rows?.some((r) => r.id === "plat_dse"));
 });
 
 Deno.test("mode_simulation shows a 2-button picker", async () => {

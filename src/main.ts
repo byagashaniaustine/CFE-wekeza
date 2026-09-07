@@ -175,15 +175,21 @@ const sendAcademyEntry = async (to: string, academyId: string, lang: Lang): Prom
 // Send the onboarding template (Flow button at index 0 → opens the onboarding
 // Flow on its CHOOSE screen). Picks the name by content language, falling back to
 // the EN template. Returns false if no name is mapped (caller can fall back).
-const sendOnboardingEntry = async (to: string, lang: Lang): Promise<boolean> => {
+//
+// When `scheme` is provided (the bot's platform picker asked first), it is
+// echoed into flow_action_data so downstream Flow updates can pre-select or
+// skip the CHOOSE screen. Today's Flow JSON still renders CHOOSE regardless —
+// updating it to bind CHOOSE's scheme field to data.scheme is a follow-up.
+const sendOnboardingEntry = async (to: string, lang: Lang, scheme?: string): Promise<boolean> => {
   const name = ONBOARDING_TEMPLATES[`onboarding-${lang}`] ?? ONBOARDING_TEMPLATES["onboarding-en"];
   if (!name) return false;
   await sendFlowTemplate({
     to,
     templateName: name,
     lang,
-    flowToken: `onboarding:${lang}`,
+    flowToken: `onboarding:${lang}${scheme ? `:${scheme}` : ""}`,
     screen: "CHOOSE",
+    flowActionData: scheme ? { scheme } : {},
   });
   return true;
 };

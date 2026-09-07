@@ -17,6 +17,7 @@ export type BotState =
   | "module" // inside a module, walking lesson screens
   | "quiz"
   | "ask" // free-text tutor mode
+  | "onboarding_platform_pick" // choosing UTT / DSE / Govt Securities before the Flow launches
   | "onboarding_done" // waiting for post-onboarding feedback (👍/👎)
   | "simulation_pick"; // choosing simulation vs DSE challenge
 

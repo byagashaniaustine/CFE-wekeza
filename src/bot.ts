@@ -53,6 +53,18 @@ const S = {
   modeSimulationDesc: L("Simulation + DSE Scholar", "Simuleshi + DSE Scholar"),
   modeAskDesc: L("Any investing question, free text", "Swali lolote la uwekezaji, andika"),
 
+  // Onboarding platform picker (fires after "Invest now" or a wa.me trigger from the simulation page)
+  pickPlatform: L(
+    "Great — which platform would you like to invest through? Pick one and we'll open the registration form.",
+    "Vizuri — ungependa kuwekeza kupitia jukwaa lipi? Chagua moja na tutafungua fomu ya usajili.",
+  ),
+  platUtt: L("UTT unit trusts", "UTT mifuko"),
+  platDse: L("DSE shares", "Hisa za DSE"),
+  platGovsec: L("Govt securities", "Dhamana serikali"),
+  platUttDesc: L("Pooled managed funds from TZS 10,000", "Mifuko ya pamoja kuanzia TZS 10,000"),
+  platDseDesc: L("Buy shares in listed companies", "Nunua hisa za kampuni zilizoorodheshwa"),
+  platGovsecDesc: L("T-bills & bonds — coming soon", "Dhamana na hatifungani — inakuja"),
+
   // Education sub-menu labels are owned by tools/education.ts.
   chooseLevel: L(
     "Each level guides you through structured lessons. Start at Beginner and progress at your own pace.",
@@ -106,6 +118,15 @@ const S = {
 };
 
 const NAV_WORDS = ["menu", "menyu", "main", "start", "anza"];
+// Free-text triggers that jump straight to the onboarding platform picker.
+// Emitted by wa.me links on the growth-simulation landing page, and typable
+// by any user who wants to skip the menu.
+const INVEST_TRIGGERS = [
+  "nataka kuwekeza",
+  "i want to invest",
+  "start investing",
+  "nianze kuwekeza",
+];
 const EN_GREET = ["hi","what's up", "hello", "hey", "good morning", "good afternoon", "good evening"];
 const SW_GREET = ["habari", "Niambie","Nambie","vp","vipi", "kwema","mambo", "jambo", "salama", "niaje", "shikamoo", "hujambo"];
 const QUIZ_WORDS = ["quiz", "jaribio"];
@@ -115,8 +136,10 @@ export interface BotOptions {
   launchFlow?: (to: string, moduleId: string, lang: Lang) => Promise<boolean>;
   sendModuleEntry?: (to: string, moduleId: string, lang: Lang) => Promise<boolean>;
   sendAcademyEntry?: (to: string, academyId: string, lang: Lang) => Promise<boolean>;
-  // Onboarding: fires the "Invest now" Flow template (CHOOSE → UTT/DSE/coming-soon).
-  sendOnboardingEntry?: (to: string, lang: Lang) => Promise<boolean>;
+  // Onboarding: fires the "Invest now" Flow template. When `scheme` is provided
+  // the caller pre-populates flow_action_data with the chosen platform so the
+  // Flow's CHOOSE screen (or a future scheme-specific launch screen) has it.
+  sendOnboardingEntry?: (to: string, lang: Lang, scheme?: string) => Promise<boolean>;
 }
 
 export function createBot(store: SessionStore, send: Sender, opts: BotOptions = {}) {
@@ -177,6 +200,35 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
         { id: "mode_ask", title: S.modeAsk[lang], description: S.modeAskDesc[lang] },
       ],
     });
+  }
+
+  async function sendPlatformPicker(to: string, lang: Lang): Promise<void> {
+    await loggedSend({
+      to,
+      kind: "list",
+      body: S.pickPlatform[lang],
+      listButton: S.open[lang],
+      rows: [
+        { id: "plat_utt", title: S.platUtt[lang], description: S.platUttDesc[lang] },
+        { id: "plat_dse", title: S.platDse[lang], description: S.platDseDesc[lang] },
+        { id: "plat_govsec", title: S.platGovsec[lang], description: S.platGovsecDesc[lang] },
+        backToModesRow(lang),
+      ],
+    });
+  }
+
+  async function launchOnboardingFor(to: string, lang: Lang, scheme: string, s: Session): Promise<void> {
+    log("ONBOARDING_PLATFORM_PICKED", { user: to, scheme });
+    s.lastLeadScheme = scheme;
+    if (sendOnboardingEntry) {
+      try {
+        const ok = await sendOnboardingEntry(to, lang, scheme);
+        if (ok) return;
+      } catch (err) {
+        log("ONBOARDING_SEND_ERROR", { to, lang, scheme, error: String(err) });
+      }
+    }
+    await handleOnboardingFailure(to, "no_template", lang, loggedSend);
   }
 
   async function sendLangPicker(to: string): Promise<void> {
@@ -394,19 +446,25 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
     }
     if (text === "mode_onboarding") {
       s.mode = "onboarding";
-      s.state = "menu";
+      s.state = "onboarding_platform_pick";
       log("ROUTE", { branch: "mode_onboarding", from });
       await save();
-      if (sendOnboardingEntry) {
-        try {
-          const ok = await sendOnboardingEntry(from, lang);
-          if (ok) return;
-        } catch (err) {
-          log("ONBOARDING_SEND_ERROR", { to: from, lang, error: String(err) });
-        }
-      }
-      // Onboarding template not configured — surface a graceful failure.
-      return await handleOnboardingFailure(from, "no_template", lang, loggedSend);
+      return await sendPlatformPicker(from, lang);
+    }
+    // Free-text "I want to invest" triggers (from wa.me links or manual typing)
+    // land the user on the platform picker, same as tapping "Invest now".
+    if (INVEST_TRIGGERS.includes(text)) {
+      s.mode = "onboarding";
+      s.state = "onboarding_platform_pick";
+      log("ONBOARDING_INTENT", { from, text });
+      await save();
+      return await sendPlatformPicker(from, lang);
+    }
+    if (text === "plat_utt" || text === "plat_dse" || text === "plat_govsec") {
+      const scheme = text.slice(5); // "utt" | "dse" | "govsec"
+      await launchOnboardingFor(from, lang, scheme, s);
+      await save();
+      return;
     }
     if (text === "mode_simulation") {
       s.mode = "simulation";
