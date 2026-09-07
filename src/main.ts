@@ -174,22 +174,16 @@ const sendAcademyEntry = async (to: string, academyId: string, lang: Lang): Prom
   return true;
 };
 
-// Send the platform-specific onboarding template. Returns false if no template
-// is mapped for the requested scheme (caller shows a graceful failure or a
-// "coming soon" message). The scheme is echoed into flow_action_data so the
-// Flow can render its scheme-specific screen.
+// Send the platform-specific onboarding template. These are plain message
+// templates in WhatsApp Manager (marketing category with a CTA URL button —
+// NOT Flow templates), so we use sendPlainTemplate. If the template were ever
+// re-published as a Flow template, swap this back to sendFlowTemplate and
+// supply flowToken / screen / flowActionData.
 const sendOnboardingEntry = async (to: string, lang: Lang, scheme?: string): Promise<boolean> => {
   if (!scheme) return false; // platform picker gates this — no scheme = misuse
   const name = ONBOARDING_TEMPLATES[scheme];
   if (!name) return false; // scheme not yet configured (e.g. govsec) — caller falls back
-  await sendFlowTemplate({
-    to,
-    templateName: name,
-    lang,
-    flowToken: `onboarding:${lang}:${scheme}`,
-    screen: "SCREEN_A",
-    flowActionData: { scheme },
-  });
+  await sendPlainTemplate({ to, templateName: name, lang });
   return true;
 };
 
