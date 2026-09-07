@@ -118,13 +118,15 @@ const ACADEMY_TEMPLATES: Record<string, string> = {
   ...JSON.parse(Deno.env.get("ACADEMY_TEMPLATES") ?? "{}"),
 };
 
-// Onboarding ("Invest now") templates — the Flow button at index 0 opens the
-// onboarding Flow on its CHOOSE screen (UTT / DSE / coming-soon). Registered in
-// WhatsApp Manager under language code "en"; the _sw name simply holds Swahili
-// content. Override names via the ONBOARDING_TEMPLATES env var.
+// Per-platform onboarding templates. The bot's platform picker (UTT / DSE /
+// Govt Securities) asks the user which scheme first, then this map selects the
+// approved template whose Flow launches straight into that platform's form.
+// All templates are registered in WhatsApp Manager under language code "en"
+// regardless of the content language they carry. Override via ONBOARDING_TEMPLATES.
 const DEFAULT_ONBOARDING_TEMPLATES: Record<string, string> = {
-  "onboarding-sw": "onboarding_sw",
-  "onboarding-en": "onboarding_en", // TODO: confirm the EN template name in WhatsApp Manager
+  utt: "onboarding_utt", // UTT AMIS unit trusts
+  dse: "onboardig_sw",   // DSE shares — literal spelling in WhatsApp Manager (missing "n" is intentional)
+  // govsec: not yet approved — bot shows a "coming soon" message and re-renders the picker
 };
 const ONBOARDING_TEMPLATES: Record<string, string> = {
   ...DEFAULT_ONBOARDING_TEMPLATES,
@@ -172,24 +174,21 @@ const sendAcademyEntry = async (to: string, academyId: string, lang: Lang): Prom
   return true;
 };
 
-// Send the onboarding template (Flow button at index 0 → opens the onboarding
-// Flow on its CHOOSE screen). Picks the name by content language, falling back to
-// the EN template. Returns false if no name is mapped (caller can fall back).
-//
-// When `scheme` is provided (the bot's platform picker asked first), it is
-// echoed into flow_action_data so downstream Flow updates can pre-select or
-// skip the CHOOSE screen. Today's Flow JSON still renders CHOOSE regardless —
-// updating it to bind CHOOSE's scheme field to data.scheme is a follow-up.
+// Send the platform-specific onboarding template. Returns false if no template
+// is mapped for the requested scheme (caller shows a graceful failure or a
+// "coming soon" message). The scheme is echoed into flow_action_data so the
+// Flow can render its scheme-specific screen.
 const sendOnboardingEntry = async (to: string, lang: Lang, scheme?: string): Promise<boolean> => {
-  const name = ONBOARDING_TEMPLATES[`onboarding-${lang}`] ?? ONBOARDING_TEMPLATES["onboarding-en"];
-  if (!name) return false;
+  if (!scheme) return false; // platform picker gates this — no scheme = misuse
+  const name = ONBOARDING_TEMPLATES[scheme];
+  if (!name) return false; // scheme not yet configured (e.g. govsec) — caller falls back
   await sendFlowTemplate({
     to,
     templateName: name,
     lang,
-    flowToken: `onboarding:${lang}${scheme ? `:${scheme}` : ""}`,
-    screen: "CHOOSE",
-    flowActionData: scheme ? { scheme } : {},
+    flowToken: `onboarding:${lang}:${scheme}`,
+    screen: "SCREEN_A",
+    flowActionData: { scheme },
   });
   return true;
 };

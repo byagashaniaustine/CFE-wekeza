@@ -104,6 +104,27 @@ Deno.test("platform picker shows failure retry when template unset", async () =>
   assert(msg.buttons?.some((b) => b.id === "mode_onboarding"), "retry present");
 });
 
+Deno.test("plat_govsec shows coming-soon text and re-renders the platform picker", async () => {
+  const calls: Array<{ scheme?: string }> = [];
+  const { bot, sent } = setup({
+    sendOnboardingEntry: (_to, _lang, scheme) => {
+      calls.push({ scheme });
+      return Promise.resolve(true);
+    },
+  });
+  await bot.handle(USER, "lang_en");
+  await bot.handle(USER, "mode_onboarding");
+  sent.length = 0;
+  await bot.handle(USER, "plat_govsec");
+  // Must NOT have called sendOnboardingEntry for govsec.
+  assertEquals(calls.length, 0);
+  // Coming-soon text sent.
+  assert(sent.some((m) => m.kind === "text" && m.body.toLowerCase().includes("coming soon")));
+  // Picker re-shown.
+  const picker = sent.find((m) => m.kind === "list" && m.rows?.some((r) => r.id === "plat_utt"));
+  assert(picker, "platform picker re-rendered after coming-soon message");
+});
+
 Deno.test("'nataka kuwekeza' free-text triggers the platform picker", async () => {
   const { bot, sent } = setup();
   await bot.handle(USER, "lang_sw");

@@ -64,6 +64,10 @@ const S = {
   platUttDesc: L("Pooled managed funds from TZS 10,000", "Mifuko ya pamoja kuanzia TZS 10,000"),
   platDseDesc: L("Buy shares in listed companies", "Nunua hisa za kampuni zilizoorodheshwa"),
   platGovsecDesc: L("T-bills & bonds — coming soon", "Dhamana na hatifungani — inakuja"),
+  govsecComingSoon: L(
+    "Government securities onboarding is coming soon. Meanwhile, you can register for UTT unit trusts or DSE shares — please pick one below.",
+    "Usajili wa dhamana za serikali unakuja hivi karibuni. Kwa sasa, unaweza kujisajili UTT mifuko au hisa za DSE — tafadhali chagua hapa chini.",
+  ),
 
   // Education sub-menu labels are owned by tools/education.ts.
   chooseLevel: L(
@@ -460,8 +464,15 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       await save();
       return await sendPlatformPicker(from, lang);
     }
-    if (text === "plat_utt" || text === "plat_dse" || text === "plat_govsec") {
-      const scheme = text.slice(5); // "utt" | "dse" | "govsec"
+    if (text === "plat_govsec") {
+      // No approved govsec template yet — tell the user and re-render the picker.
+      log("ONBOARDING_PLATFORM_PICKED", { user: from, scheme: "govsec", status: "coming_soon" });
+      await say(from, S.govsecComingSoon[lang]);
+      await save();
+      return await sendPlatformPicker(from, lang);
+    }
+    if (text === "plat_utt" || text === "plat_dse") {
+      const scheme = text.slice(5); // "utt" | "dse"
       await launchOnboardingFor(from, lang, scheme, s);
       await save();
       return;
