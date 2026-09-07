@@ -41,33 +41,60 @@ ONBOARD — user wants to start investing, sign up, register, or open an account
     "nisaidie kuanza"
     "help me register with UTT"
 
-SIMULATION — user is seeking assurance about safety / losses, wants proof of past
-growth, or is curious about live-market challenges before committing money.
-  Examples:
-    "is my money safe?"
-    "will I lose?"
-    "najuaje sitopata hasara?"
-    "pesa zangu ni salama?"
-    "how has DSE performed in the past?"
-    "prove that investing works"
-    "onyesha ukuaji wa hisa"
+SIMULATION — user seeks assurance about safety/losses, asks for past-price
+data or historical performance, wants a demo before committing, OR mentions
+the DSE Scholar Investment Challenge (a live-market simulation contest).
+This bucket owns anything that helps a hesitant user see "what would have
+happened / what could happen" before onboarding.
+  Assurance / fear:
+    "is my money safe?"                 "pesa zangu ni salama?"
+    "will I lose?"                      "najuaje sitopata hasara?"
+    "prove it works"                    "nionyeshe hii sio ulaghai"
+    "convince me"                       "naogopa hii"
+  Past-price / historical data (route ALL historical queries here — NOT ask):
+    "how has UTT performed?"            "UTT imefanya vipi?"
+    "CRDB price in 2015?"               "bei ya CRDB 2015?"
+    "Vodacom share price history"       "historia ya bei ya Vodacom"
+    "5-year performance of Umoja Fund"  "mfuko wa Umoja miaka 5"
+    "track record of DSE brokers"       "rekodi ya utendaji"
+    "what if I'd bought CRDB in 2018?"  "kama ningenunua Vodacom 2017?"
+  Demo / practice:
+    "give me a demo"                    "nataka simulation kwanza"
+    "practice mode?"                    "nataka kujaribu bila hatari"
+  DSE Scholar Challenge (definition, sign-up, participation — ALL simulation):
+    "what's the DSE Scholar Challenge?" "DSE Scholar ni nini?"
+    "how do I join the DSE challenge?"  "nijiunge vipi na shindano la DSE?"
+    "trading challenge participation"   "shindano la biashara ya hisa"
+  Downside / risk framing:
+    "downside of DSE?"                  "hatari ya DSE?"
+    "where's the lowest risk?"          "hatari ndogo iko wapi?"
+    "what if the shilling drops?"       "kama shilingi ikishuka?"
 
 ASK — user has a specific factual question about investing concepts, products,
-mechanics, or terminology.
+mechanics, terminology, fees, or regulators. NOT past prices, NOT the DSE
+Scholar Challenge, NOT assurance-seeking.
   Examples:
-    "what is UTT?"
-    "how do treasury bonds work?"
-    "what is diversification?"
-    "P/E ratio ni nini?"
-    "explain a unit trust"
-    "je hatifungani ni nini?"
+    "what is UTT?"                      "UTT ni nini?"
+    "how do treasury bonds work?"       "hatifungani hufanyaje kazi?"
+    "what is diversification?"          "mseto ni nini?"
+    "P/E ratio ni nini?"                "define IPO"
+    "explain a unit trust"              "who is CMSA?"
+    "diff between shares and bonds"     "tofauti ya hisa na hatifungani"
+    "what are the fees on DSE trades?"  "ada za DSE?"
+    "how are dividends paid?"           "gawio linalipwaje?"
 
-UNKNOWN — greetings, thanks, small talk, or genuinely unclear intent.
+UNKNOWN — greetings, thanks, small talk, off-topic (weather, sports, food),
+one-word reactions, or genuinely unclear intent.
 
 Rules:
-- If the user names a specific platform they want to invest in (UTT / DSE), still classify as ONBOARD.
-- If the user asks about safety AND names a specific concept ("is DSE safe?"), prefer SIMULATION over ASK — they want assurance, not a definition.
-- If unsure, prefer UNKNOWN so the tutor answers instead of forcing a state.`;
+- If the user names a specific platform they want to invest in ("I want UTT",
+  "nataka DSE"), classify as ONBOARD.
+- Historical data / past prices → SIMULATION (the bot has a growth simulator
+  for this — do not classify as ASK).
+- Anything mentioning DSE Scholar / investment challenge / trading contest → SIMULATION.
+- Assurance framing ("is X safe?", "prove it", "convince me") → SIMULATION.
+- Pure definition/mechanics with NO assurance framing → ASK.
+- If genuinely unsure, prefer UNKNOWN.`;
 
 // _lang is accepted for symmetry with other tools; the classifier is language-
 // agnostic (Haiku handles EN + SW natively) but keeping the parameter lets
