@@ -13,6 +13,7 @@ import {
   normalizeLead,
   resolveOnboardingUrl,
 } from "../src/tools/onboarding.ts";
+import { parseIntent } from "../src/tools/intent.ts";
 
 const USER = "255700000002";
 const last = (a: OutboundMessage[]) => a[a.length - 1];
@@ -231,6 +232,17 @@ Deno.test("normalizeLead coerces raw flow response into typed lead", () => {
   assertEquals(lead.nida, "X12345");
   assertEquals(lead.phone, "+255700111222");
   assertEquals(lead.consent, true);
+});
+
+Deno.test("parseIntent maps Claude verdicts to typed intents", () => {
+  assertEquals(parseIntent("ONBOARD"), "onboard");
+  assertEquals(parseIntent("onboard"), "onboard");
+  assertEquals(parseIntent("SIMULATION"), "simulation");
+  assertEquals(parseIntent("ASK"), "ask");
+  assertEquals(parseIntent("UNKNOWN"), "unknown");
+  assertEquals(parseIntent(""), "unknown");
+  assertEquals(parseIntent("SIMULATION\n"), "simulation");
+  assertEquals(parseIntent("random gibberish"), "unknown");
 });
 
 Deno.test("resolveOnboardingUrl reads env per scheme", () => {

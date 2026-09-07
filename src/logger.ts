@@ -23,6 +23,7 @@ export type LogCategory =
   | "ROUTE"           // which tool was selected
   | "REPLY"           // message sent back to user (bot-level intent)
   | "LANG_DETECT"     // language detection result (Tool 1)
+  | "INTENT_CLASSIFIED" // intent classifier verdict (onboard/simulation/ask/unknown)
   // WhatsApp Graph API
   | "WA_SEND"         // outbound Meta Graph send attempt
   | "WA_SEND_OK"      // outbound Meta Graph send success
@@ -247,6 +248,8 @@ function describe(category: LogCategory, e: Record<string, unknown>): string {
       return `Claude classified intent as '${g("intent")}'${has("topic") ? ` (topic=${g("topic")})` : ""} — reply language: ${g("lang")}`;
     case "LANG_DETECT":
       return `Language detected as '${g("lang")}' via ${g("method")} — input: "${clip(g("input"), 80)}"`;
+    case "INTENT_CLASSIFIED":
+      return `Intent classifier decided '${g("intent")}' for: "${clip(g("input"), 80)}"`;
     // ── LLM calls (Claude + Gemini) ────────────────────────────────────────
     case "LLM_CALL": {
       const method = has("tool") ? ` [${g("tool")}]` : "";

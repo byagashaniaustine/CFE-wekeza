@@ -29,6 +29,7 @@ import {
   sendSimulationPicker,
   sendSimulationTemplate,
 } from "./tools/simulation.ts";
+import { classifyIntent } from "./tools/intent.ts";
 
 const L = (en: string, sw: string): Loc => ({ en, sw });
 
@@ -700,9 +701,29 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       }
     }
 
-    // ── free-text tutor (Ask journey, or any unmatched text) ──
+    // ── intent-based routing for unmatched free text ──
+    // Classify the message first — if the user is clearly asking to onboard
+    // or is seeking safety assurance, jump straight into that state instead
+    // of tutoring them into a lesson. The tutor still runs for factual
+    // questions (intent="ask") and anything the classifier is unsure about.
     if (claudeEnabled) {
-      log("ROUTE", { branch: "llm_tutor", from, state: s.state, chars: raw.length });
+      const { intent, confident } = await classifyIntent(raw.trim(), lang);
+      if (confident && intent === "onboard") {
+        s.mode = "onboarding";
+        s.state = "onboarding_platform_pick";
+        log("ROUTE", { branch: "intent_onboard", from });
+        await save();
+        return await sendPlatformPicker(from, lang);
+      }
+      if (confident && intent === "simulation") {
+        s.mode = "simulation";
+        s.state = "simulation_pick";
+        log("ROUTE", { branch: "intent_simulation", from });
+        await save();
+        return await sendSimulationPicker(from, lang, loggedSend);
+      }
+      // intent === "ask" | "unknown" → fall through to the tutor below.
+      log("ROUTE", { branch: "llm_tutor", from, state: s.state, chars: raw.length, intent });
       const answer = await askClaude(raw.trim(), lang, s.history ?? []);
       if (answer) {
         s.history = [
