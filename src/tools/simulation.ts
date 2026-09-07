@@ -79,8 +79,14 @@ export async function sendSimulationTemplate(to: string, lang: Lang): Promise<bo
 
 // ─── Tool: sendChallengeTemplate ────────────────────────────────────────────
 
+// Default WhatsApp template for the DSE Scholar Investment Challenge —
+// live-market participation vs. the growth-simulation "what if" view.
+// Registered in WhatsApp Manager as `dse_investment_challenge` under
+// language code "en". Override via DSE_CHALLENGE_TEMPLATE_NAME if renamed.
+const DEFAULT_CHALLENGE_TEMPLATE = "dse_investment_challenge";
+
 export async function sendChallengeTemplate(to: string, lang: Lang): Promise<boolean> {
-  const name = Deno.env.get("DSE_CHALLENGE_TEMPLATE_NAME") ?? "";
+  const name = Deno.env.get("DSE_CHALLENGE_TEMPLATE_NAME") || DEFAULT_CHALLENGE_TEMPLATE;
   const url = Deno.env.get("DSE_CHALLENGE_URL") ?? "";
   if (!name) return false;
   try {
