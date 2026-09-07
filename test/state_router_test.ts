@@ -157,7 +157,10 @@ Deno.test("mode_simulation shows a 2-button picker", async () => {
   assert(ids.includes("sim_challenge"));
 });
 
-Deno.test("sim buttons fall back to 'coming soon' when env not set", async () => {
+Deno.test("sim buttons gracefully fall back to 'coming soon' when the template send fails", async () => {
+  // In the test env there's no WhatsApp token / --allow-net, so the template
+  // send throws inside sendSimulationTemplate. The bot must catch that and
+  // show a bilingual coming-soon message rather than a raw error.
   const { bot, sent } = setup();
   await bot.handle(USER, "lang_en");
   await bot.handle(USER, "mode_simulation");

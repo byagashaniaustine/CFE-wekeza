@@ -54,8 +54,13 @@ function urlButtonComponents(url: string): unknown[] {
 
 // ─── Tool: sendSimulationTemplate ───────────────────────────────────────────
 
+// Default WhatsApp template for the growth-simulation program. Registered in
+// WhatsApp Manager as `jionee_ukuaji` under language code "en". Override via
+// SIMULATION_TEMPLATE_NAME env var if the name ever changes.
+const DEFAULT_SIMULATION_TEMPLATE = "jionee_ukuaji";
+
 export async function sendSimulationTemplate(to: string, lang: Lang): Promise<boolean> {
-  const name = Deno.env.get("SIMULATION_TEMPLATE_NAME") ?? "";
+  const name = Deno.env.get("SIMULATION_TEMPLATE_NAME") || DEFAULT_SIMULATION_TEMPLATE;
   const url = Deno.env.get("SIMULATION_URL") ?? "";
   if (!name) return false;
   try {
