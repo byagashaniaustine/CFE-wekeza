@@ -11,7 +11,7 @@
 // is composed, only which tool to call for the current session state.
 import { DISCLAIMER, type Lang } from "./content.ts";
 import { ACADEMIES, findAcademy, findLevel, findModule, LEVELS, type Loc } from "./curriculum.ts";
-import { QUIZ_BANK, quizResult } from "./quiz.ts";
+import { answerFeedback, pickQuiz, QUIZ_BANK, quizResult } from "./quiz.ts";
 import { askClaude, claudeEnabled } from "./llm.ts";
 import { log } from "./logger.ts";
 import type { Session, SessionStore } from "./session.ts";
@@ -97,10 +97,11 @@ const S = {
   whatNext: L("What next?", "Nini sasa?"),
   nextModule: L("Next module", "Moduli ifuatayo"),
   levelDone: L("You have completed this level. Well done!", "Umekamilisha kiwango hiki. Hongera!"),
-  takeQuiz: L("Take quiz", "Fanya jaribio"),
-  quizIntro: L("General Quiz — reply A, B or C.", "Jaribio — jibu A, B au C."),
-  correct: L("Correct.", "Sahihi."),
-  wrong: L("Not quite.", "Sio sahihi."),
+  takeQuiz: L("Test me", "Jipime"),
+  quizIntro: L(
+    "Test Your Investing Ability 💡 — a quick self-test. Tap A, B or C. Let's see how sharp you are!",
+    "Jipime Uwezo wa Uwekezaji 💡 — jaribio la haraka. Gusa A, B au C. Tuone umenoa kiasi gani!",
+  ),
   askIntro: L(
     "Ask any question about investing in Tanzania. Type your question, or type 'menu' to go back.\n\nExamples:\n- What is UTT?\n- How do Treasury bonds work?\n- Is the DSE risky?",
     "Uliza swali lolote kuhusu uwekezaji Tanzania. Andika swali lako, au andika 'menyu' kurudi.\n\nMifano:\n- UTT ni nini?\n- Hatifungani hufanyaje kazi?\n- DSE ina hatari?",
@@ -362,12 +363,12 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
 
   // ── quiz ────────────────────────────────────────────────────────────────────
   async function sendQuizQuestion(to: string, s: Session, lang: Lang): Promise<void> {
-    const q = QUIZ_BANK[s.quizIdx];
+    const q = QUIZ_BANK[s.quizPick[s.quizIdx]];
     const letters = ["A", "B", "C"];
     await loggedSend({
       to,
       kind: "buttons",
-      body: `${s.quizIdx + 1}/${QUIZ_BANK.length}  ${q.q[lang]}\n\n` +
+      body: `❓ ${s.quizIdx + 1}/${s.quizPick.length}  ${q.q[lang]}\n\n` +
         q.options.map((o, i) => `${letters[i]}) ${o[lang]}`).join("\n"),
       buttons: letters.map((ltr, i) => ({ id: `ans_${i}`, title: ltr })),
     });
@@ -378,7 +379,9 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
     s.mode = "education";
     s.quizIdx = 0;
     s.score = 0;
+    s.quizStreak = 0;
     s.quizWrong = [];
+    s.quizPick = pickQuiz(); // fresh random set each attempt
     await say(to, S.quizIntro[lang]);
     await sendQuizQuestion(to, s, lang);
   }
@@ -661,14 +664,25 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
 
     // ── quiz answers ──
     if (s.state === "quiz") {
+      // Safety: a session mid-quiz from before rotation existed has no pick set.
+      if (!s.quizPick || s.quizPick.length === 0) {
+        await startQuiz(from, s, lang);
+        await save();
+        return;
+      }
       let idx = -1;
       if (text.startsWith("ans_")) idx = Number(text.slice(4));
       else if (["a", "b", "c"].includes(text)) idx = "abc".indexOf(text);
       if (idx >= 0 && idx <= 2) {
-        const q = QUIZ_BANK[s.quizIdx];
+        const q = QUIZ_BANK[s.quizPick[s.quizIdx]];
         const right = idx === q.answer;
-        if (right) s.score += 1;
-        else s.quizWrong.push(q.topic);
+        if (right) {
+          s.score += 1;
+          s.quizStreak += 1;
+        } else {
+          s.quizWrong.push(q.topic);
+          s.quizStreak = 0;
+        }
         log("ROUTE", {
           branch: "quiz_answer",
           from,
@@ -677,17 +691,17 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
           picked: idx,
           correct: right,
         });
-        await say(from, right ? S.correct[lang] : S.wrong[lang]);
         s.quizIdx += 1;
-        if (s.quizIdx >= QUIZ_BANK.length) {
+        await say(from, answerFeedback(right, s.quizStreak, s.score, s.quizIdx, q.why, lang));
+        if (s.quizIdx >= s.quizPick.length) {
           log("ROUTE", {
             branch: "quiz_complete",
             from,
             score: s.score,
-            outOf: QUIZ_BANK.length,
+            outOf: s.quizPick.length,
             wrongTopics: s.quizWrong,
           });
-          await say(from, quizResult(s.score, s.quizWrong, lang));
+          await say(from, quizResult(s.score, s.quizWrong, s.quizPick.length, lang));
           await loggedSend({
             to: from,
             kind: "buttons",

@@ -23,7 +23,7 @@ const T = {
   open: L("Open", "Fungua"),
   learn: L("Learn Investment", "Jifunze Uwekezaji"),
   products: L("Investment Products", "Bidhaa za Uwekezaji"),
-  quiz: L("General Quiz", "Jaribio la Jumla"),
+  quiz: L("Test Yourself", "Jipime Uwezo"),
   ask: L("Ask a Question", "Uliza Swali"),
   backModes: L("Back to modes", "Rudi kwenye hali"),
 };

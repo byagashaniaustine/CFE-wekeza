@@ -9,7 +9,7 @@ import { createBot } from "../src/bot.ts";
 import { createMemoryStore } from "../src/session.ts";
 import type { OutboundMessage } from "../src/whatsapp.ts";
 import { ACADEMIES, LEVELS } from "../src/curriculum.ts";
-import { QUIZ_BANK } from "../src/quiz.ts";
+import { QUIZ_BANK, QUIZ_LEN } from "../src/quiz.ts";
 
 function setup() {
   const sent: OutboundMessage[] = [];
@@ -142,14 +142,16 @@ Deno.test("products shows the academy list", async () => {
   assert(list.rows!.some((r) => r.id === "aca_utt"));
 });
 
-Deno.test("quiz runs through all questions and scores", async () => {
+Deno.test("quiz runs a rotating set and scores", async () => {
   const { bot, sent } = setup();
   await bot.handle(USER, "lang_en");
   await bot.handle(USER, "mode_education");
   await bot.handle(USER, "j_quiz");
-  for (let i = 0; i < QUIZ_BANK.length; i++) await bot.handle(USER, "ans_0");
-  const result = sent.find((m) => m.body.includes(`${QUIZ_BANK.length}/${QUIZ_BANK.length}`));
-  assert(result, "results message with full score sent");
+  for (let i = 0; i < QUIZ_LEN; i++) await bot.handle(USER, "ans_0");
+  // Each attempt asks QUIZ_LEN questions; the result shows "score/QUIZ_LEN (pct%)".
+  // The "%" uniquely distinguishes the result from the per-answer score line.
+  const result = sent.find((m) => m.body.includes(`/${QUIZ_LEN}`) && m.body.includes("%"));
+  assert(result, "results message with score out of total sent");
 });
 
 Deno.test("ask journey shows the tutor prompt", async () => {

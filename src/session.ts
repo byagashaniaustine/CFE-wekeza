@@ -32,6 +32,8 @@ export interface Session {
   screenIdx: number; // index into lesson.screens
   quizIdx: number;
   score: number;
+  quizPick: number[]; // indices into QUIZ_BANK chosen for this attempt (rotation)
+  quizStreak: number; // consecutive correct answers, for streak feedback
   quizWrong: string[]; // topics answered incorrectly (for recommendations)
   history: Array<{ role: "user" | "assistant"; content: string }>;
   lastLeadScheme: string | null; // last onboarding scheme (utt/dse/govsec/pension) — for feedback + URL routing
@@ -48,6 +50,8 @@ export const freshSession = (): Session => ({
   screenIdx: 0,
   quizIdx: 0,
   score: 0,
+  quizPick: [],
+  quizStreak: 0,
   quizWrong: [],
   history: [],
   lastLeadScheme: null,
