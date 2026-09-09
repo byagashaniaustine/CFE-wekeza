@@ -7,7 +7,7 @@ function assertEquals<T>(actual: T, expected: T, msg?: string): void {
 }
 
 import { createBot } from "../src/bot.ts";
-import { createMemoryStore } from "../src/session.ts";
+import { createMemoryStore, freshSession } from "../src/session.ts";
 import type { OutboundMessage } from "../src/whatsapp.ts";
 import {
   normalizeLead,
@@ -232,6 +232,71 @@ Deno.test("normalizeLead coerces raw flow response into typed lead", () => {
   assertEquals(lead.nida, "X12345");
   assertEquals(lead.phone, "+255700111222");
   assertEquals(lead.consent, true);
+});
+
+Deno.test("classifier reroute is suppressed while user is mid-module", async () => {
+  // Pre-seed the store: user is on the first screen of `basic-concepts` after
+  // choosing English and opening the Beginner level.
+  const store = createMemoryStore();
+  await store.set(USER, {
+    ...freshSession(),
+    lang: "en",
+    mode: "education",
+    state: "module",
+    levelId: "beginner",
+    moduleId: "basic-concepts",
+  });
+  const sent: OutboundMessage[] = [];
+  const bot = createBot(store, (m) => {
+    sent.push(m);
+    return Promise.resolve();
+  }, {
+    // Stub classifier: confidently claim the message is an onboarding request.
+    // Without the guard, this would drop the user into onboarding_platform_pick.
+    classifyIntent: () =>
+      Promise.resolve({ intent: "onboard" as const, confident: true }),
+  });
+
+  await bot.handle(USER, "some ambiguous free-text sentence");
+
+  const s = await store.get(USER);
+  assertEquals(s.state, "module", "state must remain module — classifier reroute was suppressed");
+  assertEquals(s.moduleId, "basic-concepts", "moduleId preserved");
+  // No platform picker should have been sent.
+  const picker = sent.find((m) =>
+    m.kind === "list" && m.rows?.some((r) => r.id === "plat_utt")
+  );
+  assert(!picker, "platform picker must NOT be shown while mid-module");
+});
+
+Deno.test("classifier reroute still fires from a non-active state", async () => {
+  // From the mode-picker state, the same stubbed onboard verdict SHOULD reroute.
+  // This is the counterpart to the mid-module guard — proves we didn't disable
+  // the classifier globally.
+  const store = createMemoryStore();
+  await store.set(USER, {
+    ...freshSession(),
+    lang: "en",
+    mode: null,
+    state: "mode_pick",
+  });
+  const sent: OutboundMessage[] = [];
+  const bot = createBot(store, (m) => {
+    sent.push(m);
+    return Promise.resolve();
+  }, {
+    classifyIntent: () =>
+      Promise.resolve({ intent: "onboard" as const, confident: true }),
+  });
+
+  await bot.handle(USER, "some ambiguous free-text sentence");
+
+  const s = await store.get(USER);
+  assertEquals(s.state, "onboarding_platform_pick", "state routed to platform picker");
+  const picker = sent.find((m) =>
+    m.kind === "list" && m.rows?.some((r) => r.id === "plat_utt")
+  );
+  assert(picker, "platform picker shown");
 });
 
 Deno.test("parseIntent maps Claude verdicts to typed intents", () => {

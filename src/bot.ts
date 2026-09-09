@@ -29,7 +29,7 @@ import {
   sendSimulationPicker,
   sendSimulationTemplate,
 } from "./tools/simulation.ts";
-import { classifyIntent } from "./tools/intent.ts";
+import { classifyIntent, type IntentResult } from "./tools/intent.ts";
 
 const L = (en: string, sw: string): Loc => ({ en, sw });
 
@@ -145,10 +145,15 @@ export interface BotOptions {
   // the caller pre-populates flow_action_data with the chosen platform so the
   // Flow's CHOOSE screen (or a future scheme-specific launch screen) has it.
   sendOnboardingEntry?: (to: string, lang: Lang, scheme?: string) => Promise<boolean>;
+  // Override the intent classifier — used by tests to exercise the mid-flow
+  // reroute-suppression guard without needing an Anthropic API key.
+  classifyIntent?: (text: string, lang: Lang) => Promise<IntentResult>;
 }
 
 export function createBot(store: SessionStore, send: Sender, opts: BotOptions = {}) {
   const { launchFlow, sendModuleEntry, sendAcademyEntry, sendOnboardingEntry } = opts;
+  const classify = opts.classifyIntent ?? classifyIntent;
+  const routingEnabled = opts.classifyIntent ? true : claudeEnabled;
 
   const loggedSend: Sender = async (msg) => {
     log("REPLY", {
@@ -706,23 +711,32 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
     // or is seeking safety assurance, jump straight into that state instead
     // of tutoring them into a lesson. The tutor still runs for factual
     // questions (intent="ask") and anything the classifier is unsure about.
-    if (claudeEnabled) {
-      const { intent, confident } = await classifyIntent(raw.trim(), lang);
-      if (confident && intent === "onboard") {
+    //
+    // Exception: while the user is mid-module or mid-quiz, suppress the
+    // mode-switch reroutes and answer as tutor instead. The classifier
+    // shouldn't silently drop lesson/quiz progress on a stray sentence —
+    // explicit escape hatches (menu, greetings, INVEST_TRIGGERS) still work.
+    if (routingEnabled) {
+      const { intent, confident } = await classify(raw.trim(), lang);
+      const inActiveFlow = s.state === "module" || s.state === "quiz";
+      if (confident && intent === "onboard" && !inActiveFlow) {
         s.mode = "onboarding";
         s.state = "onboarding_platform_pick";
         log("ROUTE", { branch: "intent_onboard", from });
         await save();
         return await sendPlatformPicker(from, lang);
       }
-      if (confident && intent === "simulation") {
+      if (confident && intent === "simulation" && !inActiveFlow) {
         s.mode = "simulation";
         s.state = "simulation_pick";
         log("ROUTE", { branch: "intent_simulation", from });
         await save();
         return await sendSimulationPicker(from, lang, loggedSend);
       }
-      // intent === "ask" | "unknown" → fall through to the tutor below.
+      if (confident && inActiveFlow && (intent === "onboard" || intent === "simulation")) {
+        log("ROUTE", { branch: "intent_reroute_suppressed", from, state: s.state, intent });
+      }
+      // intent === "ask" | "unknown", or reroute suppressed → tutor answer below.
       log("ROUTE", { branch: "llm_tutor", from, state: s.state, chars: raw.length, intent });
       const answer = await askClaude(raw.trim(), lang, s.history ?? []);
       if (answer) {
