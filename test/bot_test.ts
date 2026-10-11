@@ -40,15 +40,15 @@ Deno.test("first contact with clear Swahili auto-detects and shows mode picker",
   assert(picker!.rows?.some((r) => r.id === "mode_education"), "picker has education mode");
 });
 
-Deno.test("choosing a language shows the 4-state mode picker", async () => {
+Deno.test("choosing a language shows the 5-state mode picker", async () => {
   const { bot, sent } = setup();
   await bot.handle(USER, "lang_en");
   const picker = sent.find((m) => m.kind === "list");
   assert(picker, "mode picker list sent");
   const ids = picker!.rows!.map((r) => r.id);
-  assertEquals(ids.length, 4);
+  assertEquals(ids.length, 5);
   assert(
-    ["mode_education", "mode_onboarding", "mode_simulation", "mode_ask"].every((id) => ids.includes(id)),
+    ["mode_education", "mode_onboarding", "mode_simulation", "mode_ask", "mode_consumer"].every((id) => ids.includes(id)),
     `picker rows: ${ids.join(",")}`,
   );
 });

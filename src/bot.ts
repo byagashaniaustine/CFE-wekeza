@@ -18,6 +18,15 @@ import type { Session, SessionStore } from "./session.ts";
 import type { Sender } from "./whatsapp.ts";
 import { backToModesRow, detectLang, sendEducationMenu } from "./tools/education.ts";
 import {
+  CONSUMER_IDS,
+  promptScan,
+  promptVerify,
+  replyScan,
+  replyVerify,
+  sendConsumerMenu,
+  sendTips,
+} from "./tools/consumer.ts";
+import {
   captureFeedback,
   handleFailure as handleOnboardingFailure,
   resolveOnboardingUrl,
@@ -53,6 +62,8 @@ const S = {
   modeOnboardingDesc: L("Sign up for a real platform", "Jisajili kwa jukwaa halisi"),
   modeSimulationDesc: L("Simulation + DSE Scholar", "Simuleshi + DSE Scholar"),
   modeAskDesc: L("Any investing question, free text", "Swali lolote la uwekezaji, andika"),
+  modeConsumer: L("Protect me", "Nilinde"),
+  modeConsumerDesc: L("Scam check & verify a licence", "Kagua utapeli & thibitisha leseni"),
 
   // Onboarding platform picker (fires after "Invest now" or a wa.me trigger from the simulation page)
   pickPlatform: L(
@@ -209,6 +220,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
         { id: "mode_onboarding", title: S.modeOnboarding[lang], description: S.modeOnboardingDesc[lang] },
         { id: "mode_simulation", title: S.modeSimulation[lang], description: S.modeSimulationDesc[lang] },
         { id: "mode_ask", title: S.modeAsk[lang], description: S.modeAskDesc[lang] },
+        { id: "mode_consumer", title: S.modeConsumer[lang], description: S.modeConsumerDesc[lang] },
       ],
     });
   }
@@ -501,6 +513,35 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       return await say(from, S.askIntro[lang]);
     }
 
+    // ── consumer-protection mode ──
+    if (text === "mode_consumer") {
+      s.mode = "consumer";
+      s.state = "consumer_menu";
+      log("ROUTE", { branch: "mode_consumer", from });
+      await save();
+      return await sendConsumerMenu(from, lang, loggedSend);
+    }
+    if (text === CONSUMER_IDS.verify) {
+      s.mode = "consumer";
+      s.state = "consumer_verify_wait";
+      log("ROUTE", { branch: "consumer_verify", from });
+      await save();
+      return await promptVerify(from, lang, loggedSend);
+    }
+    if (text === CONSUMER_IDS.scan) {
+      s.mode = "consumer";
+      s.state = "consumer_scan_wait";
+      log("ROUTE", { branch: "consumer_scan", from });
+      await save();
+      return await promptScan(from, lang, loggedSend);
+    }
+    if (text === CONSUMER_IDS.tips) {
+      log("ROUTE", { branch: "consumer_tips", from });
+      await sendTips(from, lang, loggedSend);
+      await save();
+      return await sendConsumerMenu(from, lang, loggedSend);
+    }
+
     // ── education navigation ──
     if (text === "go_education") {
       s.mode = "education";
@@ -718,6 +759,20 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
         await save();
         return;
       }
+    }
+
+    // ── consumer-protection free-text steps ──
+    if (s.mode === "consumer" && s.state === "consumer_verify_wait") {
+      await replyVerify(from, lang, raw.trim(), loggedSend);
+      s.state = "consumer_menu";
+      await save();
+      return await sendConsumerMenu(from, lang, loggedSend);
+    }
+    if (s.mode === "consumer" && s.state === "consumer_scan_wait") {
+      await replyScan(from, lang, raw.trim(), loggedSend);
+      s.state = "consumer_menu";
+      await save();
+      return await sendConsumerMenu(from, lang, loggedSend);
     }
 
     // ── intent-based routing for unmatched free text ──

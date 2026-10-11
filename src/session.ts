@@ -4,7 +4,7 @@ import { log } from "./logger.ts";
 
 // Top-level mode the user picks up front. Each mode has its own tool surface
 // under src/tools/. `state` below still drives sub-navigation inside the mode.
-export type Mode = "education" | "onboarding" | "simulation" | "ask";
+export type Mode = "education" | "onboarding" | "simulation" | "ask" | "consumer";
 
 export type BotState =
   | "new"
@@ -19,7 +19,10 @@ export type BotState =
   | "ask" // free-text tutor mode
   | "onboarding_platform_pick" // choosing UTT / DSE / Govt Securities before the Flow launches
   | "onboarding_done" // waiting for post-onboarding feedback (👍/👎)
-  | "simulation_pick"; // choosing simulation vs DSE challenge
+  | "simulation_pick" // choosing simulation vs DSE challenge
+  | "consumer_menu" // consumer-protection sub-menu (verify / scan / tips)
+  | "consumer_verify_wait" // awaiting a provider name to verify
+  | "consumer_scan_wait"; // awaiting a message to scan
 
 export interface Session {
   lang: Lang | null; // null = not chosen yet

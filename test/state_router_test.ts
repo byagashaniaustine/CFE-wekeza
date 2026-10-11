@@ -27,17 +27,18 @@ function setup(extra: Parameters<typeof createBot>[2] = {}) {
   return { bot, sent };
 }
 
-Deno.test("mode picker exposes all four modes with descriptions", async () => {
+Deno.test("mode picker exposes all five modes with descriptions", async () => {
   const { bot, sent } = setup();
   await bot.handle(USER, "lang_en");
   const picker = sent.find((m) => m.kind === "list");
   assert(picker);
   const ids = picker!.rows!.map((r) => r.id);
-  assertEquals(ids.length, 4);
+  assertEquals(ids.length, 5);
   assert(ids.includes("mode_education"));
   assert(ids.includes("mode_onboarding"));
   assert(ids.includes("mode_simulation"));
   assert(ids.includes("mode_ask"));
+  assert(ids.includes("mode_consumer"));
   for (const r of picker!.rows!) assert(r.description && r.description.length > 0);
 });
 

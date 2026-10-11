@@ -14,14 +14,19 @@ import { findModule, type Lang } from "./curriculum.ts";
 import { log } from "./logger.ts";
 
 // ─── base64 helpers ─────────────────────────────────────────────────────────────
-const b64decode = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const b64decode = (s: string): Uint8Array<ArrayBuffer> => {
+  const bin = atob(s);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+};
 const b64encode = (b: Uint8Array) => {
   let s = "";
   for (const x of b) s += String.fromCharCode(x);
   return btoa(s);
 };
 
-function pemToDer(pem: string): Uint8Array {
+function pemToDer(pem: string): Uint8Array<ArrayBuffer> {
   const body = pem
     .replace(/-----BEGIN [^-]+-----/, "")
     .replace(/-----END [^-]+-----/, "")
