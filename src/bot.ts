@@ -218,9 +218,9 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       rows: [
         { id: "mode_education", title: S.modeEducation[lang], description: S.modeEducationDesc[lang] },
         { id: "mode_onboarding", title: S.modeOnboarding[lang], description: S.modeOnboardingDesc[lang] },
-        { id: "mode_simulation", title: S.modeSimulation[lang], description: S.modeSimulationDesc[lang] },
-        { id: "mode_ask", title: S.modeAsk[lang], description: S.modeAskDesc[lang] },
         { id: "mode_consumer", title: S.modeConsumer[lang], description: S.modeConsumerDesc[lang] },
+        { id: "mode_ask", title: S.modeAsk[lang], description: S.modeAskDesc[lang] },
+        { id: "mode_simulation", title: S.modeSimulation[lang], description: S.modeSimulationDesc[lang] },
       ],
     });
   }
