@@ -9,6 +9,7 @@ import {
 import { askGemini, geminiEnabled, probeLangGemini } from "./gemini.ts";
 import type { Lang } from "./content.ts";
 import { log } from "./logger.ts";
+import * as metrics from "./metrics.ts";
 
 export const claudeEnabled = _claudeEnabled || geminiEnabled;
 
@@ -30,18 +31,27 @@ export async function askClaude(
     const started = performance.now();
     try {
       const answer = await _askClaude(message, lang, history);
-      if (answer) return answer;
+      const ms = performance.now() - started;
+      if (answer) {
+        metrics.llmCall("claude", "ok", ms, lang);
+        return answer;
+      }
       // Claude returned empty (no valid tool response) — treat as a soft fail
       // so Gemini can take over.
+      metrics.llmCall("claude", "error", ms, lang);
+      if (geminiEnabled) metrics.llmFailover("claude", "gemini", "empty_response");
       log("LLM_FALLBACK", {
         tool: "askClaude",
-        ms: Math.round(performance.now() - started),
+        ms: Math.round(ms),
         error: "Claude returned empty response",
       });
     } catch (err) {
+      const ms = performance.now() - started;
+      metrics.llmCall("claude", "error", ms, lang);
+      if (geminiEnabled) metrics.llmFailover("claude", "gemini", "exception");
       log("LLM_FALLBACK", {
         tool: "askClaude",
-        ms: Math.round(performance.now() - started),
+        ms: Math.round(ms),
         error: String(err),
       });
     }

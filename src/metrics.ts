@@ -129,8 +129,8 @@ export function llmFailover(from: LlmProvider, to: LlmProvider, reason: string):
 }
 
 // ── delivery: templates, flows, media ───────────────────────────────────────
-export function templateSend(templateName: string, outcome: "ok" | "error", lang: Lang): void {
-  inc("template_send_total", { template: templateName, outcome, lang });
+export function templateSend(templateName: string, outcome: "ok" | "error", lang: Lang | null): void {
+  inc("template_send_total", { template: templateName, outcome, lang: lang ?? "unknown" });
 }
 
 export function flowLaunch(moduleId: string, outcome: "ok" | "fallback", lang: Lang): void {

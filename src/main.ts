@@ -8,7 +8,7 @@ import { createKvStore } from "./session.ts";
 import { createFlowEndpoint } from "./flow.ts";
 import { createWhatsAppSender, parseWebhook } from "./whatsapp.ts";
 import { sendFlowTemplate, sendPlainTemplate } from "./template_sender.ts";
-import { snapshot as metricsSnapshot } from "./metrics.ts";
+import { snapshot as metricsSnapshot, webhookReceived } from "./metrics.ts";
 import { flushLogs, log } from "./logger.ts";
 
 const app = new Hono();
@@ -299,6 +299,8 @@ app.get("/webhook", (c) => {
 app.post("/webhook", async (c) => {
   const body = await c.req.json().catch(() => null);
   const messages = parseWebhook(body);
+  for (const _ of messages) webhookReceived("message");
+  if (messages.length === 0) webhookReceived(body ? "status" : "unknown");
   log("WEBHOOK_POST", { messages: messages.length, hasBody: !!body });
   const tasks = messages.map((m) =>
     enqueue(m.from, () => bot.handle(m.from, m.text, { flowData: m.flowData })),

@@ -5,6 +5,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { Lang } from "./content.ts";
 import { log } from "./logger.ts";
+import * as metrics from "./metrics.ts";
 
 const apiKey = Deno.env.get("GEMINI_API_KEY") ?? "";
 export const geminiEnabled = apiKey.length > 0;
@@ -123,6 +124,7 @@ export async function askGemini(
 
     const ms = Math.round(performance.now() - started);
     const usage = result.response.usageMetadata;
+    metrics.llmCall("gemini", "ok", ms, lang);
     log("LLM_REPLY", {
       provider: "Gemini",
       model: modelName,
@@ -136,6 +138,7 @@ export async function askGemini(
     return text || fallback;
   } catch (err) {
     const ms = Math.round(performance.now() - started);
+    metrics.llmCall("gemini", "error", ms, lang);
     log("LLM_ERROR", {
       provider: "Gemini",
       model: modelName,

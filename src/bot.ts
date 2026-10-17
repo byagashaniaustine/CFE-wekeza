@@ -14,6 +14,7 @@ import { ACADEMIES, findAcademy, findLevel, findModule, LEVELS, type Loc } from 
 import { answerFeedback, pickQuiz, QUIZ_BANK, quizResult } from "./quiz.ts";
 import { askClaude, claudeEnabled } from "./llm.ts";
 import { log } from "./logger.ts";
+import * as metrics from "./metrics.ts";
 import type { Session, SessionStore } from "./session.ts";
 import type { Sender } from "./whatsapp.ts";
 import { backToModesRow, detectLang, sendEducationMenu } from "./tools/education.ts";
@@ -394,14 +395,28 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
     s.quizStreak = 0;
     s.quizWrong = [];
     s.quizPick = pickQuiz(); // fresh random set each attempt
+    metrics.quizStarted(lang);
     await say(to, S.quizIntro[lang]);
     await sendQuizQuestion(to, s, lang);
   }
 
   // ── main handler ──────────────────────────────────────────────────────────
   async function handle(from: string, raw: string, meta: { flowData?: Record<string, unknown> } = {}): Promise<void> {
+    const _handleStart = performance.now();
+    try {
+      return await handleImpl(from, raw, meta);
+    } finally {
+      metrics.handleLatency(performance.now() - _handleStart);
+    }
+  }
+
+  async function handleImpl(from: string, raw: string, meta: { flowData?: Record<string, unknown> } = {}): Promise<void> {
     log("INCOMING", { from, text: raw.slice(0, 300) });
     const s = await store.get(from);
+    // First-contact signal: brand new KV session has state "new" and no lang yet.
+    // Fire newUser once; messageReceived always (with whatever lang we know now).
+    if (s.state === "new" && s.lang === null) metrics.newUser(from, null);
+    metrics.messageReceived(from, s.lang);
     const text = raw.trim().toLowerCase();
     const save = () => store.set(from, s);
 
@@ -410,6 +425,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       s.lang = text === "lang_sw" ? "sw" : "en";
       s.state = "mode_pick";
       s.mode = null;
+      metrics.languageChosen(s.lang);
       log("ROUTE", { branch: "lang_pick", lang: s.lang, from });
       await save();
       await say(from, S.langSet[s.lang]);
@@ -425,6 +441,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       s.lang = isSw ? "sw" : "en";
       s.state = "mode_pick";
       s.mode = null;
+      metrics.languageChosen(s.lang);
       await save();
       await sendModePicker(from, s.lang);
       return;
@@ -437,6 +454,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
         s.lang = detected;
         s.state = "mode_pick";
         s.mode = null;
+        metrics.languageChosen(s.lang);
         await save();
         await sendModePicker(from, s.lang);
         return;
@@ -456,6 +474,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       return await sendModePicker(from, lang);
     }
     if (QUIZ_WORDS.includes(text)) {
+      metrics.journeyEntered("quiz", lang);
       await startQuiz(from, s, lang);
       await save();
       return;
@@ -508,6 +527,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
     if (text === "mode_ask") {
       s.mode = "ask";
       s.state = "ask";
+      metrics.journeyEntered("ask", lang);
       log("ROUTE", { branch: "mode_ask", from });
       await save();
       return await say(from, S.askIntro[lang]);
@@ -552,6 +572,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
     if (text === "j_learn" || text === "go_learn") {
       s.mode = "education";
       s.state = "learn_levels";
+      metrics.journeyEntered("learn", lang);
       log("ROUTE", { branch: "learn_levels", from });
       await save();
       return await sendLevels(from, lang);
@@ -559,11 +580,13 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
     if (text === "j_products" || text === "go_products") {
       s.mode = "education";
       s.state = "products";
+      metrics.journeyEntered("products", lang);
       log("ROUTE", { branch: "products", from });
       await save();
       return await sendAcademies(from, lang);
     }
     if (text === "j_quiz" || text === "go_quiz") {
+      metrics.journeyEntered("quiz", lang);
       log("ROUTE", { branch: "quiz_start", from });
       await startQuiz(from, s, lang);
       await save();
@@ -572,6 +595,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
     if (text === "j_ask") {
       s.mode = "education";
       s.state = "ask";
+      metrics.journeyEntered("ask", lang);
       log("ROUTE", { branch: "ask_intro", from });
       await save();
       return await say(from, S.askIntro[lang]);
@@ -724,6 +748,7 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
           s.quizWrong.push(q.topic);
           s.quizStreak = 0;
         }
+        metrics.quizAnswer(q.topic, right, lang);
         log("ROUTE", {
           branch: "quiz_answer",
           from,
@@ -735,6 +760,8 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
         s.quizIdx += 1;
         await say(from, answerFeedback(right, s.quizStreak, s.score, s.quizIdx, q.why, lang));
         if (s.quizIdx >= s.quizPick.length) {
+          metrics.quizCompleted(s.score, s.quizPick.length, lang);
+          for (const topic of s.quizWrong) metrics.quizWeakTopic(topic, lang);
           log("ROUTE", {
             branch: "quiz_complete",
             from,

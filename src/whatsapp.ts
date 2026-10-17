@@ -1,6 +1,7 @@
 // Thin client for the WhatsApp Cloud API (Meta Graph API).
 // Docs: https://developers.facebook.com/docs/whatsapp/cloud-api
 import { log } from "./logger.ts";
+import * as metrics from "./metrics.ts";
 
 const GRAPH_VERSION = "v21.0";
 
@@ -67,6 +68,7 @@ export function createWhatsAppSender(): Sender {
         network: true,
         error: String(err),
       });
+      metrics.errorRecorded("whatsapp_send", "network");
       console.error("WhatsApp send network error", err);
       return;
     }
@@ -74,9 +76,12 @@ export function createWhatsAppSender(): Sender {
     if (!res.ok) {
       const body = await res.text();
       log("WA_SEND_ERROR", { to: msg.to, kind: msg.kind, status: res.status, body: body.slice(0, 500), ms });
+      metrics.errorRecorded("whatsapp_send", String(res.status));
       console.error("WhatsApp send failed", res.status, body);
       return;
     }
+    metrics.messageSent(msg.kind, null);
+    metrics.replyLatency(ms, msg.kind);
     log("WA_SEND_OK", { to: msg.to, kind: msg.kind, status: res.status, ms });
   };
 }

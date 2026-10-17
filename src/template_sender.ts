@@ -8,6 +8,7 @@
 
 import { log } from "./logger.ts";
 import type { Lang } from "./content.ts";
+import * as metrics from "./metrics.ts";
 
 const ACCESS_TOKEN = Deno.env.get("WHATSAPP_TOKEN") ?? "";
 const PHONE_NUMBER_ID = Deno.env.get("WHATSAPP_PHONE_ID") ?? "";
@@ -47,6 +48,7 @@ async function postTemplate(
   to: string,
   templateName: string,
   components?: unknown[],
+  lang: Lang | null = null,
 ): Promise<void> {
   const payload = {
     messaging_product: "whatsapp",
@@ -72,10 +74,13 @@ async function postTemplate(
 
   if (!res.ok) {
     const body = await res.text();
+    metrics.templateSend(templateName, "error", lang);
     log("TEMPLATE_ERROR", { to, templateName, status: res.status, body });
     throw new Error(`WhatsApp template send failed ${res.status}: ${body}`);
   }
 
+  metrics.templateSend(templateName, "ok", lang);
+  metrics.messageSent("template", lang);
   log("TEMPLATE_SENT", { to, templateName });
 }
 
@@ -86,9 +91,10 @@ async function postTemplate(
 export async function sendPlainTemplate({
   to,
   templateName,
+  lang,
   components,
 }: PlainTemplateOptions): Promise<void> {
-  await postTemplate(to, templateName, components);
+  await postTemplate(to, templateName, components, lang ?? null);
 }
 
 // Send a template whose button at index 0 is a WhatsApp Flow button.
@@ -125,7 +131,7 @@ export async function sendFlowTemplate({
     },
   ];
 
-  await postTemplate(to, templateName, components);
+  await postTemplate(to, templateName, components, lang);
 }
 
 // Convenience wrapper: choose sendFlowTemplate vs sendPlainTemplate based on
