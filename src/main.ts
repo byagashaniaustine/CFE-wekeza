@@ -272,14 +272,18 @@ app.get("/debug/streamlogia", async (c) => {
 // `Authorization: Bearer <token>` (or `?token=<token>`); otherwise the endpoint
 // is open — set the token in Deploy to keep counters private.
 const METRICS_TOKEN = Deno.env.get("METRICS_TOKEN");
-app.get("/metrics", (c) => {
+app.get("/metrics", async (c) => {
   if (METRICS_TOKEN) {
     const auth = c.req.header("authorization") ?? "";
     const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     const supplied = bearer || c.req.query("token") || "";
     if (supplied !== METRICS_TOKEN) return c.text("Unauthorized", 401);
   }
-  return c.json(metricsSnapshot());
+  // ?range=1|7|30 — number of days to aggregate; default 7. Caller may pass
+  // any positive integer; snapshot() reads from KV via a bounded prefix scan.
+  const raw = Number(c.req.query("range") ?? 7);
+  const days = Number.isFinite(raw) && raw > 0 ? Math.min(400, Math.floor(raw)) : 7;
+  return c.json(await metricsSnapshot(days));
 });
 
 // Webhook verification (Meta sends this once when you configure the webhook).
