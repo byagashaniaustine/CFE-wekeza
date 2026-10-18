@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { createBot } from "./bot.ts";
 import { findModule } from "./curriculum.ts";
 import type { Lang } from "./content.ts";
-import { createKvStore } from "./session.ts";
+import { createSessionStore } from "./session.ts";
 import { createFlowEndpoint } from "./flow.ts";
 import { createWhatsAppSender, parseWebhook } from "./whatsapp.ts";
 import { sendFlowTemplate, sendPlainTemplate } from "./template_sender.ts";
@@ -12,7 +12,7 @@ import { snapshot as metricsSnapshot, webhookReceived } from "./metrics.ts";
 import { flushLogs, log } from "./logger.ts";
 
 const app = new Hono();
-const store = await createKvStore();
+const store = createSessionStore();
 
 // Per-user message queue: chains each incoming handle() call onto the previous
 // one for that user, so concurrent webhook POSTs never race on the same session.

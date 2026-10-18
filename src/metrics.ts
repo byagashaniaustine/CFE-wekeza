@@ -1,140 +1,56 @@
-// Durable, globally-correct metrics backed by Deno KV atomic counters.
+// Durable, globally-correct metrics backed by Supabase.
 //
-// Why this isn't in-process. Deno Deploy runs serverless isolates that get
-// torn down between requests, and multiple isolates can serve traffic
-// concurrently. A `Map<string, number>` in RAM would:
-//   • reset at every isolate cold start (data loss),
-//   • fragment across isolates (never-aggregated views),
-//   • be invisible to any other service (the dashboard can't read it).
-// Writing to Deno KV from every recorder gives us one global, durable set of
-// counters — persisted, correct across isolates, and readable from any
-// process that shares the same KV database.
+// Why Supabase instead of in-process Maps or Deno KV:
+//   • Deno Deploy isolates get torn down — in-process Maps lose counters at
+//     every cold start and fragment across concurrent isolates.
+//   • The dashboard needs to read these counters without an HTTP proxy. One
+//     shared Postgres table solves it: bot writes with the service role key,
+//     dashboard reads with the anon key via RLS policies.
+//   • True distinct-user counts over 7/30-day windows are a plain
+//     COUNT DISTINCT in Postgres — Deno KV's atomic counters can't do that.
 //
-// Shape. Every counter is a Deno.KvU64 at key:
-//     ["metric", "YYYY-MM-DD", name]                        — unlabelled
-//     ["metric", "YYYY-MM-DD", name, label-key, label-val]  — one label
-// Daily partition keeps per-key cardinality bounded and lets snapshot()
-// scan a date range cheaply with a bounded `kv.list` call. Multiple labels
-// are serialised into a single stable string so the key arity is fixed.
+// Storage shape (see supabase/migrations/0001_cfe_bot_core.sql):
+//   cfe_metric_counters(day, name, labels jsonb, value bigint)
+//   cfe_metric_uniques(day, set_name, user_id)
+//   cfe_metric_inc(_day, _name, _labels, _by)  — atomic upsert RPC
+//   cfe_metric_add_unique(_day, _set, _user)   — insert-on-conflict RPC
 //
-// Histograms. KV can't store sample arrays efficiently, so we bucket at
-// write time into log-scaled boundaries and increment the bucket's counter.
-// snapshot() turns bucket cumulative counts into p50/p95/p99 estimates. The
-// estimate is bounded by the bucket width, which is good enough for ops.
+// Histograms: fixed log-scaled bucket boundaries baked into observe(). Each
+// sample increments bucket + sum + count counters in one RPC batch; snapshot()
+// estimates p50/p95/p99 from cumulative bucket counts.
 //
-// Hot-path safety. inc/observe/addUnique dispatch asynchronously via
-// queueMicrotask and swallow KV errors — a KV outage never breaks the bot.
-// Reads via snapshot() are bounded prefix scans, so cost is O(days × keys),
-// never O(all metrics ever written).
-//
-// Retention. Each counter is written with `expireIn: METRIC_RETENTION_DAYS`
-// (default 400). Scans never see expired keys.
+// Hot-path safety: every recorder dispatches writes via queueMicrotask and
+// swallows errors — a Supabase outage never blocks the bot's reply path. If
+// Supabase is unconfigured (local dev), writes land in an in-memory fallback
+// and snapshot() still returns something sensible.
 
 import type { Lang } from "./content.ts";
-import { openKv } from "./kv.ts";
+import { getSupabase } from "./supabase.ts";
 
 // ── config ─────────────────────────────────────────────────────────────────
-const RETENTION_DAYS = Math.max(
-  7,
-  Number(Deno.env.get("METRIC_RETENTION_DAYS") ?? 400),
-);
-const RETENTION_MS = RETENTION_DAYS * 24 * 60 * 60 * 1000;
-const WRITES_ENABLED = (Deno.env.get("METRICS_KV") ?? "on").toLowerCase() !== "off";
+const WRITES_ENABLED = (Deno.env.get("METRICS_ENABLED") ?? "on").toLowerCase() !== "off";
 
-// Fixed histogram buckets (ms). Covers 1ms – 30s with log-ish spacing. Any
-// sample above the last boundary falls into the implicit `+inf` bucket, so
-// the whole thing is bounded. Shared across every observe() site.
+// Fixed histogram buckets (ms). Covers 10ms – 30s. Any sample above the last
+// boundary falls into the implicit "inf" bucket.
 const BUCKETS_MS = [10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, 30_000] as const;
-
-// Unique-user daily cap. If more than this many distinct users hit the bot in
-// one day, we stop tracking individual ids (counter becomes a lower bound).
-const UNIQUE_CAP = 100_000;
 
 // ── primitives ─────────────────────────────────────────────────────────────
 type Labels = Record<string, string>;
 
 const dayKey = (ts = Date.now()) => new Date(ts).toISOString().slice(0, 10);
+const todayUtc = dayKey;
 
-// Serialise labels into a single stable string so the KV key arity stays at
-// most 5. Sorted so the same {lang:"en",outcome:"ok"} always maps to the
-// same key regardless of insertion order.
-function labelsKey(labels?: Labels): string | null {
-  if (!labels) return null;
-  const entries = Object.entries(labels).filter(([_, v]) => v !== undefined && v !== null);
-  if (entries.length === 0) return null;
-  entries.sort(([a], [b]) => a.localeCompare(b));
-  return entries.map(([k, v]) => `${k}=${v}`).join(",");
-}
-
-function metricKey(day: string, name: string, labels?: Labels): Deno.KvKey {
-  const lk = labelsKey(labels);
-  return lk ? ["metric", day, name, lk] : ["metric", day, name];
-}
-
-// Fire-and-forget KV write. Never throws, never blocks the caller.
-function fireAtomic(mutate: (tx: Deno.AtomicOperation) => Deno.AtomicOperation): void {
-  if (!WRITES_ENABLED) return;
-  queueMicrotask(async () => {
-    try {
-      const kv = await openKv();
-      const res = await mutate(kv.atomic()).commit();
-      if (!res.ok) {
-        console.error(JSON.stringify({
-          ts: new Date().toISOString(),
-          category: "WARN",
-          step: "metrics.atomic",
-          msg: "atomic commit returned ok=false",
-        }));
-      }
-    } catch (err) {
-      console.error(JSON.stringify({
-        ts: new Date().toISOString(),
-        category: "WARN",
-        step: "metrics.write",
-        error: String(err),
-      }));
-    }
-  });
-}
-
-function inc(name: string, labels?: Labels, by = 1): void {
-  const day = dayKey();
-  const key = metricKey(day, name, labels);
-  fireAtomic((tx) => tx.sum(key, BigInt(by)).set(["metric_ttl", day], 1, { expireIn: RETENTION_MS }));
-}
-
-function setGauge(name: string, value: number, labels?: Labels): void {
-  const day = dayKey();
-  const key: Deno.KvKey = ["gauge", name, labelsKey(labels) ?? ""];
-  if (!WRITES_ENABLED) return;
-  queueMicrotask(async () => {
-    try {
-      const kv = await openKv();
-      await kv.set(key, value, { expireIn: RETENTION_MS });
-      await kv.set(["metric_ttl", day], 1, { expireIn: RETENTION_MS });
-    } catch (err) {
-      console.error(JSON.stringify({ ts: new Date().toISOString(), category: "WARN", step: "metrics.gauge", error: String(err) }));
-    }
-  });
-}
-
-function observe(name: string, value: number, labels?: Labels): void {
-  // Pick the first bucket whose boundary >= value, else the implicit +inf
-  // bucket represented as "inf". Bucket counters are atomic-sum like regular
-  // counters, so observe() is as cheap as inc().
-  const bucket = pickBucket(value);
-  const day = dayKey();
-  const base = { ...(labels ?? {}), bucket };
-  const key = metricKey(day, `${name}__bucket`, base);
-  const sumKey = metricKey(day, `${name}__sum`, labels);
-  const cntKey = metricKey(day, `${name}__count`, labels);
-  fireAtomic((tx) =>
-    tx
-      .sum(key, 1n)
-      .sum(sumKey, BigInt(Math.round(value)))
-      .sum(cntKey, 1n)
-      .set(["metric_ttl", day], 1, { expireIn: RETENTION_MS })
-  );
+function cleanLabels(labels?: Labels): Record<string, string> {
+  if (!labels) return {};
+  const out: Record<string, string> = {};
+  // Sort by key so the same labels always serialise to the same jsonb payload
+  // (Postgres hashes jsonb by content, so sort order doesn't matter for the
+  // UNIQUE constraint — but we sort anyway for log consistency).
+  const sorted = Object.entries(labels)
+    .filter(([_, v]) => v !== undefined && v !== null)
+    .sort(([a], [b]) => a.localeCompare(b));
+  for (const [k, v] of sorted) out[k] = String(v);
+  return out;
 }
 
 function pickBucket(value: number): string {
@@ -142,42 +58,114 @@ function pickBucket(value: number): string {
   return "inf";
 }
 
-function addUnique(setName: string, id: string): void {
+// ── in-memory fallback (used when SUPABASE_URL unset — local dev + tests) ──
+// Shape mirrors the Supabase tables so snapshot() can read it the same way.
+interface MemoryStore {
+  counters: Map<string, number>; // key = `${day}|${name}|${labelsJson}`
+  uniques: Map<string, Set<string>>; // key = `${day}|${setName}`
+}
+const memory: MemoryStore = { counters: new Map(), uniques: new Map() };
+const memKey = (day: string, name: string, labels: Labels) =>
+  `${day}|${name}|${JSON.stringify(labels)}`;
+
+function memInc(day: string, name: string, labels: Labels, by: number) {
+  const k = memKey(day, name, labels);
+  memory.counters.set(k, (memory.counters.get(k) ?? 0) + by);
+}
+function memAddUnique(day: string, setName: string, user: string): boolean {
+  const k = `${day}|${setName}`;
+  const s = memory.uniques.get(k) ?? new Set<string>();
+  const was = s.size;
+  s.add(user);
+  memory.uniques.set(k, s);
+  return s.size > was;
+}
+
+// ── fire-and-forget write dispatcher ───────────────────────────────────────
+function fire(op: () => Promise<unknown>): void {
   if (!WRITES_ENABLED) return;
-  const day = dayKey();
-  const key: Deno.KvKey = ["unique", day, setName];
-  queueMicrotask(async () => {
-    try {
-      const kv = await openKv();
-      // Compare-and-swap: read current set, append if new, cap at UNIQUE_CAP.
-      for (let i = 0; i < 5; i++) {
-        const cur = await kv.get<string[]>(key);
-        const list = cur.value ?? [];
-        if (list.includes(id)) return;
-        if (list.length >= UNIQUE_CAP) {
-          // Treat as a lower bound beyond the cap. Still bump the day counter.
-          await kv.atomic().sum(["metric", day, `${setName}_overflow`], 1n).commit();
-          return;
-        }
-        const res = await kv.atomic()
-          .check({ key, versionstamp: cur.versionstamp })
-          .set(key, [...list, id], { expireIn: RETENTION_MS })
-          .commit();
-        if (res.ok) return;
-      }
-    } catch (err) {
-      console.error(JSON.stringify({ ts: new Date().toISOString(), category: "WARN", step: "metrics.unique", error: String(err) }));
-    }
+  queueMicrotask(() => {
+    op().catch((err) => {
+      // Writes must never crash the bot. Log via stdout only — calling log()
+      // from here would recurse through metrics itself.
+      console.error(JSON.stringify({
+        ts: new Date().toISOString(),
+        category: "WARN",
+        step: "metrics.write",
+        error: String(err?.message ?? err),
+      }));
+    });
   });
 }
 
-// ── public recorders — SAME SIGNATURES as the previous in-process impl ────
-// Any caller that was using these keeps working unchanged.
+async function supabaseInc(day: string, name: string, labels: Labels, by: number) {
+  const sb = getSupabase();
+  if (!sb) { memInc(day, name, labels, by); return; }
+  const { error } = await sb.rpc("cfe_metric_inc", {
+    _day: day,
+    _name: name,
+    _labels: labels,
+    _by: by,
+  });
+  if (error) throw error;
+}
+
+async function supabaseAddUnique(day: string, setName: string, user: string) {
+  const sb = getSupabase();
+  if (!sb) { memAddUnique(day, setName, user); return; }
+  const { error } = await sb.rpc("cfe_metric_add_unique", {
+    _day: day,
+    _set: setName,
+    _user: user,
+  });
+  if (error) throw error;
+}
+
+function inc(name: string, labels?: Labels, by = 1): void {
+  const day = dayKey();
+  const clean = cleanLabels(labels);
+  fire(() => supabaseInc(day, name, clean, by));
+}
+
+function observe(name: string, value: number, labels?: Labels): void {
+  const day = dayKey();
+  const clean = cleanLabels(labels);
+  const bucket = pickBucket(value);
+  const rounded = Math.round(value);
+  fire(async () => {
+    await supabaseInc(day, `${name}__bucket`, { ...clean, bucket }, 1);
+    await supabaseInc(day, `${name}__sum`, clean, rounded);
+    await supabaseInc(day, `${name}__count`, clean, 1);
+  });
+}
+
+function addUnique(setName: string, id: string): void {
+  const day = dayKey();
+  fire(() => supabaseAddUnique(day, setName, id));
+}
+
+function setGauge(name: string, value: number, labels?: Labels): void {
+  // Gauges are a single-row-per-key latest-wins pattern. Rare in this bot
+  // (only queueDepth today). Store as a counter with a special name so the
+  // snapshot still sees them, and overwrite the value each call via upsert.
+  const day = dayKey();
+  const clean = cleanLabels(labels);
+  fire(async () => {
+    const sb = getSupabase();
+    if (!sb) { memory.counters.set(memKey(day, `__gauge__${name}`, clean), value); return; }
+    const { error } = await sb
+      .from("cfe_metric_counters")
+      .upsert({ day, name: `__gauge__${name}`, labels: clean, value }, { onConflict: "day,name,labels" });
+    if (error) throw error;
+  });
+}
+
+// ── public recorders — SAME SIGNATURES as previous versions ────────────────
 
 export function messageReceived(userId: string, lang: Lang | null): void {
   inc("messages_received_total", { lang: lang ?? "unknown" });
   addUnique("users_all_time", userId);
-  addUnique(`users_daily:${dayKey()}`, userId);
+  addUnique(`users_daily:${todayUtc()}`, userId);
 }
 
 export function messageSent(kind: string, lang: Lang | null): void {
@@ -270,7 +258,7 @@ export function webhookReceived(kind: "message" | "status" | "unknown"): void {
   inc("webhook_events_total", { kind });
 }
 
-// ── snapshot / reset ───────────────────────────────────────────────────────
+// ── snapshot ───────────────────────────────────────────────────────────────
 
 export interface HistogramSummary {
   count: number;
@@ -288,7 +276,6 @@ export interface Snapshot {
   from: string;
   to: string;
   counters: Record<string, number>;
-  gauges: Record<string, number>;
   histograms: Record<string, HistogramSummary>;
   uniques: Record<string, number>;
 }
@@ -296,68 +283,18 @@ export interface Snapshot {
 const daysBack = (n: number) => dayKey(Date.now() - n * 86_400_000);
 
 /**
- * Aggregate every KV counter / histogram / unique set across the last `days`
- * days (default 7). Bounded prefix scan over `["metric", day, ...]` so the
- * cost is O(days × distinct labelled keys), not O(all history).
+ * Aggregate counters + histograms + uniques across the last `days` days.
+ * Supabase path is a single SELECT per table over the date range. Memory
+ * path iterates in-process state. Returned shape is identical.
  */
 export async function snapshot(days = 7): Promise<Snapshot> {
-  const kv = await openKv();
   const from = daysBack(days - 1);
   const to = daysBack(0);
-  const start: Deno.KvKey = ["metric", from];
-  const end: Deno.KvKey = ["metric", to + "￿"];
-
-  const rawCounters: Record<string, number> = {};
-  const histBuckets: Record<string, Record<string, number>> = {};
-  const histSums: Record<string, number> = {};
-  const histCounts: Record<string, number> = {};
-
-  // Counters + histograms live under the same ["metric", ...] prefix. We
-  // read both in one scan and demux by name suffix.
-  for await (const entry of kv.list<Deno.KvU64 | number>({ start, end })) {
-    const [, , name, label] = entry.key as [string, string, string, string?];
-    const raw = entry.value;
-    const value = typeof raw === "bigint"
-      ? Number(raw)
-      : raw && typeof (raw as unknown as { value?: unknown }).value === "bigint"
-      ? Number((raw as unknown as { value: bigint }).value)
-      : Number(raw);
-    const n = String(name);
-    if (n.endsWith("__bucket")) {
-      const base = n.slice(0, -"__bucket".length);
-      const bucket = parseLabel(label ?? "", "bucket");
-      if (!bucket) continue;
-      const existing = histBuckets[base] ?? (histBuckets[base] = {});
-      existing[bucket] = (existing[bucket] ?? 0) + value;
-    } else if (n.endsWith("__sum")) {
-      const base = n.slice(0, -"__sum".length);
-      histSums[base] = (histSums[base] ?? 0) + value;
-    } else if (n.endsWith("__count")) {
-      const base = n.slice(0, -"__count".length);
-      histCounts[base] = (histCounts[base] ?? 0) + value;
-    } else {
-      const flat = label ? `${n}{${label}}` : n;
-      rawCounters[flat] = (rawCounters[flat] ?? 0) + value;
-    }
-  }
-
-  // Gauges — latest wins per label. Not day-partitioned.
-  const gauges: Record<string, number> = {};
-  for await (const entry of kv.list<number>({ prefix: ["gauge"] })) {
-    const [, name, label] = entry.key as [string, string, string];
-    const flat = label ? `${name}{${label}}` : name;
-    gauges[flat] = typeof entry.value === "number" ? entry.value : Number(entry.value);
-  }
-
-  // Unique-set sizes — one key per day per set, scan the range.
-  const uniques: Record<string, number> = {};
-  const uStart: Deno.KvKey = ["unique", from];
-  const uEnd: Deno.KvKey = ["unique", to + "￿"];
-  for await (const entry of kv.list<string[]>({ start: uStart, end: uEnd })) {
-    const [, , setName] = entry.key as [string, string, string];
-    const size = Array.isArray(entry.value) ? entry.value.length : 0;
-    uniques[String(setName)] = (uniques[String(setName)] ?? 0) + size;
-  }
+  const sb = getSupabase();
+  const { counters: rawCounters, histBuckets, histSums, histCounts } = sb
+    ? await readCountersSupabase(sb, from, to)
+    : readCountersMemory(from, to);
+  const uniques = sb ? await readUniquesSupabase(sb, from, to) : readUniquesMemory(from, to);
 
   const histograms: Record<string, HistogramSummary> = {};
   for (const base of Object.keys(histBuckets)) {
@@ -381,26 +318,113 @@ export async function snapshot(days = 7): Promise<Snapshot> {
     from,
     to,
     counters: rawCounters,
-    gauges,
     histograms,
     uniques,
   };
 }
 
-function parseLabel(label: string, want: string): string | null {
-  for (const pair of label.split(",")) {
-    const [k, v] = pair.split("=");
-    if (k === want) return v;
+type CountersRead = {
+  counters: Record<string, number>;
+  histBuckets: Record<string, Record<string, number>>;
+  histSums: Record<string, number>;
+  histCounts: Record<string, number>;
+};
+
+async function readCountersSupabase(
+  sb: NonNullable<ReturnType<typeof getSupabase>>,
+  from: string,
+  to: string,
+): Promise<CountersRead> {
+  const out: CountersRead = { counters: {}, histBuckets: {}, histSums: {}, histCounts: {} };
+  const { data, error } = await sb
+    .from("cfe_metric_counters")
+    .select("name, labels, value")
+    .gte("day", from)
+    .lte("day", to);
+  if (error) {
+    console.error(JSON.stringify({ ts: new Date().toISOString(), category: "WARN", step: "snapshot.counters", error: String(error.message ?? error) }));
+    return out;
   }
-  return null;
+  for (const row of data ?? []) {
+    accumulate(out, row.name as string, row.labels as Record<string, string>, Number(row.value));
+  }
+  return out;
+}
+
+function readCountersMemory(from: string, to: string): CountersRead {
+  const out: CountersRead = { counters: {}, histBuckets: {}, histSums: {}, histCounts: {} };
+  for (const [k, v] of memory.counters) {
+    const [day, name, labelsJson] = k.split("|", 3);
+    if (day < from || day > to) continue;
+    const labels = labelsJson ? JSON.parse(labelsJson) as Record<string, string> : {};
+    accumulate(out, name, labels, v);
+  }
+  return out;
+}
+
+function accumulate(out: CountersRead, name: string, labels: Record<string, string>, value: number) {
+  if (name.endsWith("__bucket")) {
+    const base = name.slice(0, -"__bucket".length);
+    const bucket = labels.bucket ?? "unknown";
+    const existing = out.histBuckets[base] ?? (out.histBuckets[base] = {});
+    existing[bucket] = (existing[bucket] ?? 0) + value;
+  } else if (name.endsWith("__sum")) {
+    const base = name.slice(0, -"__sum".length);
+    out.histSums[base] = (out.histSums[base] ?? 0) + value;
+  } else if (name.endsWith("__count")) {
+    const base = name.slice(0, -"__count".length);
+    out.histCounts[base] = (out.histCounts[base] ?? 0) + value;
+  } else {
+    const flat = Object.keys(labels).length
+      ? `${name}{${Object.entries(labels).sort().map(([k, v]) => `${k}="${v}"`).join(",")}}`
+      : name;
+    out.counters[flat] = (out.counters[flat] ?? 0) + value;
+  }
+}
+
+async function readUniquesSupabase(
+  sb: NonNullable<ReturnType<typeof getSupabase>>,
+  from: string,
+  to: string,
+): Promise<Record<string, number>> {
+  // Rolling distinct count across the window: group by set_name, count
+  // distinct user_id. Done via a single SELECT so cost scales with distinct
+  // (set_name, user_id) pairs in the window, not raw row count.
+  const { data, error } = await sb
+    .from("cfe_metric_uniques")
+    .select("set_name, user_id")
+    .gte("day", from)
+    .lte("day", to);
+  if (error) {
+    console.error(JSON.stringify({ ts: new Date().toISOString(), category: "WARN", step: "snapshot.uniques", error: String(error.message ?? error) }));
+    return {};
+  }
+  const sets: Record<string, Set<string>> = {};
+  for (const row of data ?? []) {
+    const name = row.set_name as string;
+    const user = row.user_id as string;
+    (sets[name] ??= new Set()).add(user);
+  }
+  const out: Record<string, number> = {};
+  for (const [k, s] of Object.entries(sets)) out[k] = s.size;
+  return out;
+}
+
+function readUniquesMemory(from: string, to: string): Record<string, number> {
+  const sets: Record<string, Set<string>> = {};
+  for (const [k, s] of memory.uniques) {
+    const [day, name] = k.split("|", 2);
+    if (day < from || day > to) continue;
+    const dest = sets[name] ?? (sets[name] = new Set());
+    for (const u of s) dest.add(u);
+  }
+  const out: Record<string, number> = {};
+  for (const [k, s] of Object.entries(sets)) out[k] = s.size;
+  return out;
 }
 
 function estimatePercentile(buckets: Record<string, number>, total: number, p: number): number {
   if (total === 0) return 0;
-  // Walk buckets in ascending boundary order and find the one where the
-  // cumulative count crosses the target rank. The returned value is the
-  // bucket boundary (upper bound), so the estimate is biased high within
-  // one bucket width — acceptable for ops.
   const target = (p / 100) * total;
   const sorted = [...BUCKETS_MS, Infinity].map((b) => String(b === Infinity ? "inf" : b));
   let cum = 0;
@@ -411,14 +435,10 @@ function estimatePercentile(buckets: Record<string, number>, total: number, p: n
   return 30_000;
 }
 
-/** Clear ALL metrics state. Tests only — never call in production. */
-export async function reset(): Promise<void> {
-  const kv = await openKv();
-  for (const prefix of [["metric"], ["gauge"], ["unique"], ["metric_ttl"]] as Deno.KvKey[]) {
-    for await (const entry of kv.list({ prefix })) {
-      await kv.delete(entry.key);
-    }
-  }
+/** Clear ALL in-memory metrics state. Tests only. */
+export function reset(): void {
+  memory.counters.clear();
+  memory.uniques.clear();
 }
 
 /** Flush pending microtask-scheduled writes. Tests only. */
@@ -427,7 +447,6 @@ export async function _flushForTests(): Promise<void> {
   await new Promise<void>((r) => queueMicrotask(() => r()));
 }
 
-// Short stable label — avoids leaking WhatsApp phone numbers into gauge keys.
 function hashUser(id: string): string {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;

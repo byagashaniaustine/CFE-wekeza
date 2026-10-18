@@ -9,7 +9,8 @@
     "hono": "npm:hono@^4.6.0",
     "@anthropic-ai/sdk": "npm:@anthropic-ai/sdk@^0.56.0",
     "@google/generative-ai": "npm:@google/generative-ai@^0.21.0",
-    "@streamlogia/javascript-sdk": "npm:@streamlogia/javascript-sdk@^1.0.0"
+    "@streamlogia/javascript-sdk": "npm:@streamlogia/javascript-sdk@^1.0.0",
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@^2.45.4"
   },
   "compilerOptions": {
     "strict": true

@@ -1,23 +1,109 @@
 {
   "version": "5",
   "specifiers": {
+    "jsr:@deno/deployctl@*": "1.13.1",
+    "jsr:@denosaurs/tty@0.2.1": "0.2.1",
+    "jsr:@denosaurs/tty@~0.2.1": "0.2.1",
+    "jsr:@denosaurs/wait@0.2.2": "0.2.2",
+    "jsr:@std/assert@0.217": "0.217.0",
     "jsr:@std/assert@1": "1.0.19",
+    "jsr:@std/async@0.217": "0.217.0",
+    "jsr:@std/dotenv@0.217": "0.217.0",
+    "jsr:@std/encoding@0.217": "0.217.0",
+    "jsr:@std/flags@0.217": "0.217.0",
+    "jsr:@std/fmt@0.217": "0.217.0",
+    "jsr:@std/fmt@1": "1.0.10",
     "jsr:@std/internal@^1.0.12": "1.0.14",
+    "jsr:@std/jsonc@0.217": "0.217.0",
+    "jsr:@std/path@0.217": "0.217.0",
+    "jsr:@std/semver@0.217": "0.217.0",
+    "jsr:@std/streams@0.217": "0.217.0",
     "npm:@anthropic-ai/sdk@0.56": "0.56.0",
     "npm:@google/generative-ai@0.21": "0.21.0",
     "npm:@streamlogia/javascript-sdk@1": "1.0.0",
     "npm:@streamlogia/javascript-sdk@1.0.0": "1.0.0",
-    "npm:hono@^4.6.0": "4.12.25"
+    "npm:@supabase/supabase-js@^2.45.4": "2.116.0",
+    "npm:hono@^4.6.0": "4.12.25",
+    "npm:keychain@1.5.0": "1.5.0"
   },
   "jsr": {
+    "@deno/deployctl@1.13.1": {
+      "integrity": "84245138a17546f184aebcc2dd49061b3437b8819be54195ab144e7b4e86be2a",
+      "dependencies": [
+        "jsr:@denosaurs/tty@0.2.1",
+        "jsr:@denosaurs/wait",
+        "jsr:@std/async",
+        "jsr:@std/dotenv",
+        "jsr:@std/encoding",
+        "jsr:@std/flags",
+        "jsr:@std/fmt@0.217",
+        "jsr:@std/jsonc",
+        "jsr:@std/path",
+        "jsr:@std/semver",
+        "jsr:@std/streams",
+        "npm:keychain"
+      ]
+    },
+    "@denosaurs/tty@0.2.1": {
+      "integrity": "f1fc651cc9021c90bf230a45c6eb893c26a54fae6a855e9cd26aad0083d772dd"
+    },
+    "@denosaurs/wait@0.2.2": {
+      "integrity": "5ec0a7e72c57a96c9fdb2f4a52e2ce3b1ad010acc59fefe6f88054a9e27bc33d",
+      "dependencies": [
+        "jsr:@denosaurs/tty@~0.2.1",
+        "jsr:@std/fmt@1"
+      ]
+    },
+    "@std/assert@0.217.0": {
+      "integrity": "c98e279362ca6982d5285c3b89517b757c1e3477ee9f14eb2fdf80a45aaa9642"
+    },
     "@std/assert@1.0.19": {
       "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
       "dependencies": [
         "jsr:@std/internal"
       ]
     },
+    "@std/async@0.217.0": {
+      "integrity": "14dac94f59595e39e519de379c47170d8bbedea253824c4b167108aa943ddb69"
+    },
+    "@std/dotenv@0.217.0": {
+      "integrity": "e65cbbf669f482c320b2f94d0a2fc536f1fcd06afdcfa4fde358129a18d1d428"
+    },
+    "@std/encoding@0.217.0": {
+      "integrity": "b03e8ff94c98d6b6a02c02c5cf8e5d203400155516248964fc4559abc04669dc"
+    },
+    "@std/flags@0.217.0": {
+      "integrity": "2d67502692d76cfe37fba1c4a92d0a5fe0a6f9601900fd7c510936b0e4e0242e",
+      "dependencies": [
+        "jsr:@std/assert@0.217"
+      ]
+    },
+    "@std/fmt@0.217.0": {
+      "integrity": "cb99f82500b8da20202fedfa8bb94dd0222e81f0494ed9087de20ee3d8a39a8d"
+    },
+    "@std/fmt@1.0.10": {
+      "integrity": "90dfba288802ac6de82fb31d0917eb9e4450b9925b954d5e51fc29ac07419db5"
+    },
     "@std/internal@1.0.14": {
       "integrity": "291516b3d4c35024d6ffbc0a9df5bf4c64116e05b50012cf846710152d2ffdf7"
+    },
+    "@std/jsonc@0.217.0": {
+      "integrity": "125c47f36ef8160e1b4fd5bff096e8f0ea3f49bea197de5b182eb130bb8a527c",
+      "dependencies": [
+        "jsr:@std/assert@0.217"
+      ]
+    },
+    "@std/path@0.217.0": {
+      "integrity": "1217cc25534bca9a2f672d7fe7c6f356e4027df400c0e85c0ef3e4343bc67d11",
+      "dependencies": [
+        "jsr:@std/assert@0.217"
+      ]
+    },
+    "@std/semver@0.217.0": {
+      "integrity": "c1ba42cdcaacf610f1a62ec2256ab29765a73fede65120214c3acb9c85ed3d35"
+    },
+    "@std/streams@0.217.0": {
+      "integrity": "b4a6de703d6aa59c4777f89fc002e82b8401dada44d1e6f7e916664c1e6cfd36"
     }
   },
   "npm": {
@@ -31,8 +117,62 @@
     "@streamlogia/javascript-sdk@1.0.0": {
       "integrity": "sha512-9PXDG3FAe2Z0fhTklneUAVyW48DDosWdsXhMUTWIMOX1WeNkOmI250f6++vyjImWhUqzKQlYbe2kjLO8RW9wiw=="
     },
+    "@supabase/auth-js@2.116.0": {
+      "integrity": "sha512-Cmosty12gyKGK9N3bQb+lMmuAFev5nmUzaR1AsmZHqKOAGzqX1VQzmp49CNPwOx/pw0H9Qqk4rs9yhwTlKpfDg==",
+      "dependencies": [
+        "tslib"
+      ]
+    },
+    "@supabase/functions-js@2.116.0": {
+      "integrity": "sha512-E+VOc2QDcni/fySqkBFiZhnoB3SGydEdZgFI6/dEAGAHx6yEhB46TN9qb2wXs+E+RSzOBV0R6dasiSlw4xlZAA==",
+      "dependencies": [
+        "tslib"
+      ]
+    },
+    "@supabase/phoenix@0.4.5": {
+      "integrity": "sha512-aAn9H9ovVyeApKy11OWOrrOGq8DV68yWeH4ud2lN9fzn4aO8Zb5GLL9m1pUg9nLqIcT+ZDfAcsZe0E/nqdv2lw=="
+    },
+    "@supabase/postgrest-js@2.116.0": {
+      "integrity": "sha512-kGpVZTDHxFTJS3tu+rU0iTAZ+4U0bcLVjxwCk8f3gRhjw3qdCZjTBlgYvc4kGH2XccmAzbkKwXL/mrNHMGSc+A==",
+      "dependencies": [
+        "tslib"
+      ]
+    },
+    "@supabase/realtime-js@2.116.0": {
+      "integrity": "sha512-MHAnlXxi2s6yiJsZsQMfs2B3RFxeVfQWxerqYhIMqcCQV/FuY3LIeouPEkXw/ah7wUWMLYwempF9MOCUScyddg==",
+      "dependencies": [
+        "@supabase/phoenix",
+        "tslib"
+      ]
+    },
+    "@supabase/storage-js@2.116.0": {
+      "integrity": "sha512-6/3hR6vccBP6oGM5B6RfbwZcTCKmQOodd/ZWQdsw8yJsU5zO/a//oBL6yLnmgxcjnHSrelW8rsO7hL5DPybyUQ==",
+      "dependencies": [
+        "iceberg-js",
+        "tslib"
+      ]
+    },
+    "@supabase/supabase-js@2.116.0": {
+      "integrity": "sha512-YyWmKXt2NspV9iO8FPnlswUFJIRnrLd3oTCb+3ZyYRuKZtBH0xCUDgnUqoyA0fGUxpM/UhfwDjYf/dht/9bp7g==",
+      "dependencies": [
+        "@supabase/auth-js",
+        "@supabase/functions-js",
+        "@supabase/postgrest-js",
+        "@supabase/realtime-js",
+        "@supabase/storage-js"
+      ]
+    },
     "hono@4.12.25": {
       "integrity": "sha512-2NFaIyNVgJmBs/ecmtGzlmluTFs5cHEWGTdu0t1HBwYzoGXOL5nUQBRMXsXWla5i4KkG//QMzVP88m1+I3fdAQ=="
+    },
+    "iceberg-js@0.8.1": {
+      "integrity": "sha512-1dhVQZXhcHje7798IVM+xoo/1ZdVfzOMIc8/rgVSijRK38EDqOJoGula9N/8ZI5RD8QTxNQtK/Gozpr+qUqRRA=="
+    },
+    "keychain@1.5.0": {
+      "integrity": "sha512-liyp4r+93RI7EB2jhwaRd4MWfdgHH6shuldkaPMkELCJjMFvOOVXuTvw1pGqFfhsrgA6OqfykWWPQgBjQakVag=="
+    },
+    "tslib@2.8.1": {
+      "integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="
     }
   },
   "workspace": {
@@ -40,6 +180,7 @@
       "npm:@anthropic-ai/sdk@0.56",
       "npm:@google/generative-ai@0.21",
       "npm:@streamlogia/javascript-sdk@1",
+      "npm:@supabase/supabase-js@^2.45.4",
       "npm:hono@^4.6.0"
     ]
   }

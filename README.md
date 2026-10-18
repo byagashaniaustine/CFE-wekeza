@@ -17,8 +17,10 @@ for Financial Inclusion (2023).
 | 🛡️ Scam awareness & CMSA investor protection | cmsa.go.tz, CFE05 |
 | 🧠 5-question quiz with explanations | CFE assessment approach |
 
-Users navigate with WhatsApp interactive lists and buttons. Sessions (language,
-lesson progress, quiz score) persist in **Deno KV** for 30 days.
+Users navigate with WhatsApp interactive lists and buttons. Sessions
+(language, lesson progress, quiz score) and metrics (daily counters,
+histograms, distinct-user sets) persist in **Supabase** (Postgres). Local dev
+without a Supabase project falls back to in-memory stores.
 
 ## Project structure
 
@@ -49,12 +51,21 @@ Meta's webhook config set:
 - Verify token: value of `WHATSAPP_VERIFY_TOKEN`
 - Subscribe to the `messages` webhook field.
 
-### 3. Deploy (Deno Deploy — free tier works)
+### 3. Supabase (sessions + metrics storage)
+1. Create a project at [supabase.com](https://supabase.com) (free tier works).
+2. Open the SQL Editor → run `supabase/migrations/0001_cfe_bot_core.sql`
+   (creates `cfe_sessions`, `cfe_metric_counters`, `cfe_metric_uniques` plus
+   RLS policies and atomic-increment RPCs).
+3. Copy the project URL and the `service_role` key from Settings → API.
+4. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env` (local) and
+   in the Deno Deploy project env (production).
+
+### 4. Deploy (Deno Deploy — free tier works)
 ```bash
-deployctl deploy --project=wekeza-bot src/main.ts
+deployctl deploy --project=cfe-wekeza --prod --entrypoint=src/main.ts
 ```
-Set the three env vars in the Deno Deploy dashboard. Deno KV works natively
-there. Point the Meta webhook at `https://wekeza-bot.deno.dev/webhook`.
+Set the env vars in the Deno Deploy project dashboard. Point the Meta
+webhook at `https://cfe-wekeza.<org>.deno.net/webhook`.
 
 ## Using the bot
 
