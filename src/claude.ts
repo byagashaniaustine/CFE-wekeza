@@ -5,11 +5,13 @@
 //     [Tool 2: menuInfoResponse]  — verifies menu topics, returns curriculum facts + live data
 //     [Tool 3: generalQA]         — CFE-grounded Q&A, simple language, web search for 3-month data
 //     [Tool 4: consultation]      — deep investment analysis, Tanzania authorities, CFE references
+//     [Tool 5: verifyLicence]     — FSP/entity existence + licence lookup (BoT/CMSA/TIRA directory)
 //     [inline]                    — greeting / off-topic handled directly in router
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { Lang } from "./content.ts";
 import { log } from "./logger.ts";
+import { formatLicence, verifyLicence } from "./tools/consumer.ts";
 
 const apiKey = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 export const claudeEnabled = apiKey.length > 0;
@@ -75,6 +77,7 @@ export type Intent =
   | "MENU_INFO_QUERY"
   | "GENERAL_QUESTION"
   | "CONSULTATION"
+  | "ENTITY_LOOKUP"
   | "OFF_TOPIC";
 
 export type Topic =
@@ -95,7 +98,9 @@ type Classification = {
 // Small, fast call that returns structured JSON only.
 
 const CLASSIFIER_PROMPT = `
-You are an intent classifier for a Tanzania financial literacy WhatsApp bot.
+You are an intent classifier for a Tanzania financial WhatsApp bot operating
+across the full BoT (Bank of Tanzania) regulated ecosystem — plus adjacent
+regulators CMSA (capital markets), TIRA (insurance), and SSRA (pensions).
 Analyse the user message and return ONLY a valid JSON object — no other text.
 
 JSON shape:
@@ -105,13 +110,38 @@ JSON shape:
   "lang": string
 }
 
+IN-SCOPE (treat as financial — do NOT return OFF_TOPIC):
+  • Banking: commercial banks, community banks, microfinance (MFIs like Finca,
+    BRAC, Vision Fund), SACCOS, cooperative banks, digital banks
+  • Mobile money & payments: M-Pesa, Tigo Pesa / Yas, Airtel Money, HaloPesa,
+    Mixx by Yas, TIPS, agents
+  • Forex bureaus, credit reference bureaus, credit information
+  • Monetary topics: TZS, interest rates, inflation, exchange rates, Repo
+  • Capital markets: DSE shares, UTT AMIS unit trusts, T-bills, Treasury bonds
+  • Insurance (TIRA) and pensions (NSSF, PSSSF, NISS)
+  • Consumer protection: complaints against FSPs, scam checks, licence lookups,
+    agent misconduct, deposit insurance (DIB)
+
 INTENT values:
-  GREETING        — user is greeting or just starting (hi, hello, habari, mambo, anza, start)
-  MENU_NAVIGATION — user is navigating the structured menu (next, quiz, menu, lesson selection, A/B/C answers)
-  MENU_INFO_QUERY — asking about a specific topic covered in the bot menu (e.g. "how does UTT AMIS work?")
-  GENERAL_QUESTION — financial literacy question not tied to one specific menu section
-  CONSULTATION    — wants analysis or advice on their personal investment situation ("I have TZS X, what should I do?", "I want to invest for 5 years")
-  OFF_TOPIC       — nothing to do with personal finance or investing in Tanzania
+  GREETING        — greeting or just starting (hi, hello, habari, mambo, anza, start)
+  MENU_NAVIGATION — navigating the structured menu (next, quiz, menu, A/B/C answers)
+  MENU_INFO_QUERY — asking about a specific topic covered in the curriculum menu
+  GENERAL_QUESTION — any in-scope financial question not tied to a menu section
+                     (banking, mobile money, forex, inflation, deposit insurance, …)
+  CONSULTATION    — wants analysis / advice on their personal situation
+                     ("I have TZS X, what should I do?", "I want to invest for 5 years")
+  ENTITY_LOOKUP   — asking whether a SPECIFIC named company, bank, microfinance,
+                     mobile-money provider, SACCOS, forex bureau, broker, scheme, or
+                     agent EXISTS / is LICENSED / is LEGITIMATE. Examples:
+                       "Is Finca Microfinance real?"
+                       "Je, Mkombozi Bank ni halali?"
+                       "Je, kuna kampuni Tz inaitwa X?"
+                       "Should I trust Y Investment Ltd?"
+                     If the message names a specific entity and asks about its
+                     existence / licence / safety, this wins over GENERAL_QUESTION.
+  OFF_TOPIC       — clearly NOT financial (weather, sports, politics, chit-chat,
+                     relationships, health). Be conservative: when in doubt, use
+                     GENERAL_QUESTION, not OFF_TOPIC.
 
 TOPIC (set only when intent is MENU_INFO_QUERY, otherwise null):
   BASICS    — saving, investing, emergency fund, risk, diversification
@@ -122,8 +152,8 @@ TOPIC (set only when intent is MENU_INFO_QUERY, otherwise null):
   SAFETY    — scam prevention, CMSA licensing, red flags
 
 LANG detection from message keywords:
-  en — English words present: invest, save, shares, fund, bond, pension, account, money, return, risk, how, what, where, buy, sell, interest, profit, market, broker
-  sw — Kiswahili words present: wekeza, akiba, hisa, mfuko, hatifungani, pensheni, akaunti, fedha, faida, hatari, riba, nunua, uza, jinsi, nini, niambie, nataka, naweza, benki
+  en — English words present: invest, save, shares, fund, bond, pension, account, money, return, risk, how, what, where, buy, sell, interest, profit, market, broker, bank, loan, microfinance
+  sw — Kiswahili words present: wekeza, akiba, hisa, mfuko, hatifungani, pensheni, akaunti, fedha, faida, hatari, riba, nunua, uza, jinsi, nini, niambie, nataka, naweza, benki, mkopo, halali, kampuni
 
 Return ONLY the JSON object.
 `.trim();
@@ -578,12 +608,24 @@ export async function askClaude(
         return reply;
       }
 
+      case "ENTITY_LOOKUP": {
+        // Named-entity existence / licence check against the FSP directory
+        // (BoT / CMSA / TIRA). The formatter handles licensed / flagged /
+        // not_found and always appends the "verify directly with regulator"
+        // disclaimer, so it is safe even when the entity is absent.
+        log("ROUTE", { tool: "verifyLicence", lang: replyLang });
+        const res = verifyLicence(message);
+        const reply = formatLicence(res, replyLang);
+        log("REPLY", { tool: "verifyLicence", status: res.status, chars: reply.length, preview: reply.slice(0, 120) });
+        return reply;
+      }
+
       case "OFF_TOPIC":
       default: {
         log("ROUTE", { tool: "inline/off-topic", lang: replyLang });
         const reply = replyLang === "sw"
-          ? "Ninasaidia elimu ya fedha Tanzania pekee: akiba, uwekezaji, UTT AMIS, DSE, hatifungani, pensheni, na kujikinga na ulaghai. Andika menyu kuanza."
-          : "I only cover Tanzania financial literacy: savings, investing, UTT AMIS, DSE shares, bonds, pensions, and scam protection. Type menu to get started.";
+          ? "Nina mipaka ya masuala ya kifedha Tanzania pekee: mabenki, mikopo midogo, pesa za simu, forex, DSE, UTT AMIS, hatifungani, pensheni, bima, na malalamiko ya watumiaji. Andika menyu kuanza."
+          : "I cover Tanzania financial matters only: banks, microfinance, mobile money, forex, DSE, UTT AMIS, bonds, pensions, insurance, and consumer complaints. Type menu to get started.";
         log("REPLY", { tool: "inline/off-topic", chars: reply.length, preview: reply });
         return reply;
       }

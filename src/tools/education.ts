@@ -26,6 +26,7 @@ const T = {
   quiz: L("Test Yourself", "Jipime Uwezo"),
   ask: L("Ask a Question", "Uliza Swali"),
   backModes: L("Back to modes", "Rudi kwenye hali"),
+  section: L("Topics", "Mada"),
 };
 
 export function backToModesRow(lang: Lang): ListRow {
@@ -38,6 +39,7 @@ export async function sendEducationMenu(to: string, lang: Lang, send: Sender): P
     kind: "list",
     body: UI.welcome[lang],
     listButton: T.open[lang],
+    sectionTitle: T.section[lang],
     rows: [
       { id: "j_learn", title: T.learn[lang] },
       { id: "j_products", title: T.products[lang] },

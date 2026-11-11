@@ -145,17 +145,30 @@ function addUnique(setName: string, id: string): void {
 }
 
 function setGauge(name: string, value: number, labels?: Labels): void {
-  // Gauges are a single-row-per-key latest-wins pattern. Rare in this bot
-  // (only queueDepth today). Store as a counter with a special name so the
-  // snapshot still sees them, and overwrite the value each call via upsert.
-  const day = dayKey();
+  // Gauges are a latest-wins key→value pattern — one row per gauge name,
+  // overwritten on every write. Backed by cfe_metric_gauges in Supabase.
+  // Labels, if present, are folded into the gauge name (`${name}:k=v`) so
+  // the primary key stays a single text column that the dashboard can read
+  // as a flat map without unpacking a jsonb column.
+  //
+  // NOTE on dashboard-owned gauges: the dashboard also reads `agents_online`
+  // from this table (human operators currently logged in). The bot has no
+  // visibility into human-agent presence and does not emit that gauge — it
+  // must be written by the dashboard backend when operators sign in/out.
   const clean = cleanLabels(labels);
+  const suffix = Object.entries(clean).length
+    ? ":" + Object.entries(clean).map(([k, v]) => `${k}=${v}`).join(",")
+    : "";
+  const key = `${name}${suffix}`;
   fire(async () => {
     const sb = getSupabase();
-    if (!sb) { memory.counters.set(memKey(day, `__gauge__${name}`, clean), value); return; }
+    if (!sb) {
+      memory.counters.set(memKey(dayKey(), `__gauge__${key}`, {}), value);
+      return;
+    }
     const { error } = await sb
-      .from("cfe_metric_counters")
-      .upsert({ day, name: `__gauge__${name}`, labels: clean, value }, { onConflict: "day,name,labels" });
+      .from("cfe_metric_gauges")
+      .upsert({ name: key, value, updated_at: new Date().toISOString() }, { onConflict: "name" });
     if (error) throw error;
   });
 }
@@ -245,6 +258,69 @@ export function replyLatency(ms: number, kind: string): void {
 }
 export function queueDepth(userId: string, depth: number): void {
   setGauge("user_queue_depth", depth, { user: hashUser(userId) });
+}
+
+// ── Consumer-protection mode counters ──────────────────────────────────────
+// Scam shield + licence check panels both read these aggregate counters for
+// their tiles (high/med/low; licensed/flagged/not_found). cfe_scam_reports
+// stores the full-fidelity rows; these counters give the dashboard a cheap
+// grouped-count without a GROUP BY on the reports table.
+export function scamScan(risk: "high" | "medium" | "low", lang: Lang): void {
+  inc("scam_scan_total", { risk, lang });
+}
+export function licenceCheck(result: "licensed" | "flagged" | "not_found", lang: Lang): void {
+  inc("licence_check_total", { result, lang });
+}
+
+// ── BoT escalation funnel (consumer-protection "Report a problem") ─────────
+// The dashboard draws a funnel: started → FSP checked (yes/no) → 14-day check
+// (yes/no) → provider captured → submitted. Drop-off between any two tiles is
+// where to tune copy. consumerReportAbandoned is fired when a user leaves the
+// flow mid-step (nav word, mode switch, LLM fallback) — labels which stage.
+export type ReportStage =
+  | "intro"
+  | "fsp_check"
+  | "days_check"
+  | "provider_wait"
+  | "issue_wait"
+  | "response_wait";
+
+export function consumerReportStarted(lang: Lang): void {
+  inc("consumer_report_started_total", { lang });
+}
+export function consumerReportFspCheck(answer: "yes" | "no", lang: Lang): void {
+  inc("consumer_report_fsp_check_total", { answer, lang });
+}
+export function consumerReportDaysCheck(answer: "yes" | "no", lang: Lang): void {
+  inc("consumer_report_days_check_total", { answer, lang });
+}
+export function consumerReportProviderCaptured(lang: Lang): void {
+  inc("consumer_report_provider_captured_total", { lang });
+}
+export function consumerReportSubmitted(lang: Lang): void {
+  inc("consumer_report_submitted_total", { lang });
+}
+export function consumerReportAbandoned(stage: ReportStage, lang: Lang): void {
+  inc("consumer_report_abandoned_total", { stage, lang });
+}
+
+// ── Intent classification counter ──────────────────────────────────────────
+// Fired after the Claude Haiku classifier returns a verdict. Powers the
+// dashboard's "Input / Intent breakdown" tile (ask / onboard / simulation /
+// unknown mix).
+export function intentClassified(intent: string, lang: Lang): void {
+  inc("intent_classified_total", { intent, lang });
+}
+
+// ── Feedback & lead counters ───────────────────────────────────────────────
+// Thumbs-up/down after onboarding or module completion, and the lead-captured
+// event when a WhatsApp Flow lead reaches the bot (regardless of downstream
+// webhook outcome).
+export function feedbackRecorded(rating: "up" | "down", context: string, lang: Lang): void {
+  inc("feedback_total", { rating, context, lang });
+}
+export function leadCaptured(scheme: string, lang: Lang): void {
+  inc("lead_captured_total", { scheme, lang });
 }
 
 export function errorRecorded(where: string, code?: string): void {

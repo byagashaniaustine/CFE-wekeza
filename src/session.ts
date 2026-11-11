@@ -33,7 +33,21 @@ export type BotState =
   | "simulation_pick"
   | "consumer_menu"
   | "consumer_verify_wait"
-  | "consumer_scan_wait";
+  | "consumer_scan_wait"
+  | "consumer_report_fsp_check"
+  | "consumer_report_days_check"
+  | "consumer_report_provider_wait"
+  | "consumer_report_issue_wait"
+  | "consumer_report_response_wait";
+
+// In-progress BoT complaint being collected across several turns. Lives on the
+// session so the dashboard can see partial drafts and resume if the user drops
+// off; cleared on submit or on any mode switch.
+export interface ReportDraft {
+  fspName?: string;
+  issue?: string;
+  fspResponse?: string;
+}
 
 export interface Session {
   lang: Lang | null;
@@ -51,6 +65,7 @@ export interface Session {
   quizWrong: string[];
   history: Array<{ role: "user" | "assistant"; content: string }>;
   lastLeadScheme: string | null;
+  reportDraft: ReportDraft | null;
 }
 
 export const freshSession = (): Session => ({
@@ -69,6 +84,7 @@ export const freshSession = (): Session => ({
   quizWrong: [],
   history: [],
   lastLeadScheme: null,
+  reportDraft: null,
 });
 
 export interface SessionStore {
@@ -109,6 +125,7 @@ interface SessionRow {
   quiz_wrong: string[];
   history: Array<{ role: "user" | "assistant"; content: string }>;
   last_lead_scheme: string | null;
+  report_draft: ReportDraft | null;
   updated_at: string;
 }
 
@@ -129,6 +146,7 @@ function rowToSession(r: SessionRow): Session {
     quizWrong: r.quiz_wrong ?? [],
     history: r.history ?? [],
     lastLeadScheme: r.last_lead_scheme,
+    reportDraft: r.report_draft ?? null,
   };
 }
 
@@ -150,6 +168,7 @@ function sessionToRow(user: string, s: Session): SessionRow {
     quiz_wrong: s.quizWrong,
     history: s.history,
     last_lead_scheme: s.lastLeadScheme,
+    report_draft: s.reportDraft,
     updated_at: new Date().toISOString(),
   };
 }

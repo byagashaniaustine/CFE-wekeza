@@ -23,6 +23,10 @@ export interface OutboundMessage {
   buttons?: Button[];
   listButton?: string;
   rows?: ListRow[];
+  // List section header rendered above the rows. WhatsApp requires a non-empty
+  // value — callers should pass the localized label so Swahili users don't see
+  // an English "Topics" heading above a translated row set.
+  sectionTitle?: string;
   // for kind "flow": launch a published WhatsApp Flow
   flowId?: string;
   flowToken?: string;
@@ -158,7 +162,7 @@ function toPayload(msg: OutboundMessage): Record<string, unknown> {
       action: {
         button: (msg.listButton ?? "Menu").slice(0, 20),
         sections: [{
-          title: "Topics",
+          title: (msg.sectionTitle ?? "Topics").slice(0, 24),
           rows: (msg.rows ?? []).slice(0, 10).map((r) => ({
             id: r.id,
             title: r.title.slice(0, 24),

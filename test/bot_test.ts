@@ -10,6 +10,11 @@ import { createMemoryStore } from "../src/session.ts";
 import type { OutboundMessage } from "../src/whatsapp.ts";
 import { ACADEMIES, LEVELS } from "../src/curriculum.ts";
 import { QUIZ_BANK, QUIZ_LEN } from "../src/quiz.ts";
+import {
+  _flushForTests as flushRecorder,
+  _resetForTests as resetRecorder,
+  _snapshotForTests as snapshotRecorder,
+} from "../src/recorder.ts";
 
 function setup() {
   const sent: OutboundMessage[] = [];
@@ -161,6 +166,73 @@ Deno.test("ask journey shows the tutor prompt", async () => {
   sent.length = 0;
   await bot.handle(USER, "j_ask");
   assert(last(sent).body.toLowerCase().includes("uliza"));
+});
+
+Deno.test("consumer report: FSP-not-yet-contacted shows guidance and returns to menu", async () => {
+  resetRecorder();
+  const { bot, sent } = setup();
+  await bot.handle(USER, "lang_en");
+  await bot.handle(USER, "mode_consumer");
+  await bot.handle(USER, "cp_report");
+  sent.length = 0;
+  await bot.handle(USER, "cpr_fsp_no");
+  // User must see FSP-first guidance (14-day language) and then the menu again.
+  const guidance = sent.find((m) => m.kind === "text" && m.body.includes("14 days"));
+  assert(guidance, "FSP-first guidance sent");
+  const menuAfter = sent.find((m) => m.kind === "list" && m.rows?.some((r) => r.id === "cp_report"));
+  assert(menuAfter, "returned to consumer menu");
+  // No row should be written to cfe_consumer_reports — user never submitted.
+  await flushRecorder();
+  assertEquals(snapshotRecorder().reports.length, 0);
+});
+
+Deno.test("consumer report: full submission records a row + HITL item", async () => {
+  resetRecorder();
+  const { bot, sent } = setup();
+  await bot.handle(USER, "lang_en");
+  await bot.handle(USER, "mode_consumer");
+  await bot.handle(USER, "cp_report");
+  await bot.handle(USER, "cpr_fsp_yes");
+  await bot.handle(USER, "cpr_days_yes");
+  await bot.handle(USER, "CRDB Bank");
+  await bot.handle(USER, "Wrong amount debited on 2026-10-15, TZS 50,000, ref TX998877");
+  sent.length = 0;
+  await bot.handle(USER, "They said they would investigate but never followed up.");
+  await flushRecorder();
+  const snap = snapshotRecorder();
+  assertEquals(snap.reports.length, 1, "one report row written");
+  const row = snap.reports[0] as Record<string, unknown>;
+  assertEquals(row.fsp_name, "CRDB Bank");
+  assertEquals(row.status, "awaiting_bot");
+  assertEquals(row.fsp_contacted, true);
+  // HITL item enqueued for ops, with the BoT-complaint tag.
+  const hitl = snap.hitl.find((h) => (h as Record<string, unknown>).tag === "BoT complaint");
+  assert(hitl, "HITL item enqueued with 'BoT complaint' tag");
+  // The user got BoT contact details back.
+  const bodies = sent.map((m) => m.body).join("\n");
+  assert(bodies.includes("bot.go.tz"), "BoT website shared with user");
+  assert(bodies.includes("botcommunications@bot.go.tz"), "BoT email shared");
+});
+
+Deno.test("consumer report: cancel mid-flow clears draft + returns to menu", async () => {
+  resetRecorder();
+  const { bot, sent } = setup();
+  await bot.handle(USER, "lang_en");
+  await bot.handle(USER, "mode_consumer");
+  await bot.handle(USER, "cp_report");
+  await bot.handle(USER, "cpr_fsp_yes");
+  await bot.handle(USER, "cpr_days_yes");
+  await bot.handle(USER, "NMB Bank");
+  sent.length = 0;
+  await bot.handle(USER, "cpr_cancel");
+  // "Report cancelled" line + menu again.
+  const cancelMsg = sent.find((m) => m.kind === "text" && m.body.toLowerCase().includes("cancel"));
+  assert(cancelMsg, "cancel confirmation sent");
+  const menu = sent.find((m) => m.kind === "list" && m.rows?.some((r) => r.id === "cp_report"));
+  assert(menu, "menu re-rendered");
+  await flushRecorder();
+  // No row written — the user bailed mid-flow.
+  assertEquals(snapshotRecorder().reports.length, 0);
 });
 
 Deno.test("content integrity: curriculum parity, limits, quiz shape", () => {
