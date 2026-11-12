@@ -3,7 +3,8 @@
     "dev": "deno run --allow-net --allow-env --unstable-kv --env --watch src/main.ts",
     "start": "deno run --allow-net --allow-env --unstable-kv --env src/main.ts",
     "test": "deno test --allow-env --unstable-kv",
-    "check": "deno check src/main.ts test/bot_test.ts test/state_router_test.ts"
+    "check": "deno check src/main.ts test/bot_test.ts test/state_router_test.ts",
+    "refresh-providers": "deno run --allow-net=www.bot.go.tz --allow-write=src/data/providers.generated.ts scripts/refresh_providers.ts"
   },
   "imports": {
     "hono": "npm:hono@^4.6.0",

@@ -14,6 +14,8 @@
 import type { Lang } from "../content.ts";
 import type { ListRow, Sender } from "../whatsapp.ts";
 import { log } from "../logger.ts";
+import * as metrics from "../metrics.ts";
+import { recordScamReport } from "../recorder.ts";
 import {
   FLAGGED,
   LICENCE_SOURCE_NOTE_EN,
@@ -29,7 +31,17 @@ export const CONSUMER_IDS = {
   verify: "cp_verify",
   scan: "cp_scan",
   tips: "cp_tips",
+  report: "cp_report",
   back: "go_modes",
+} as const;
+
+// Button ids used inside the BoT escalation (report-a-problem) funnel.
+export const REPORT_IDS = {
+  fspYes: "cpr_fsp_yes",
+  fspNo: "cpr_fsp_no",
+  daysYes: "cpr_days_yes",
+  daysNo: "cpr_days_no",
+  cancel: "cpr_cancel",
 } as const;
 
 const T = {
@@ -41,6 +53,7 @@ const T = {
   verify: L("Verify a licence", "Thibitisha leseni"),
   scan: L("Scan a message", "Chunguza ujumbe"),
   tips: L("Spot a scam", "Tambua utapeli"),
+  report: L("Report a problem", "Ripoti tatizo"),
   back: L("Back to modes", "Rudi kwenye hali"),
   askVerify: L(
     "Type the name of the company, fund or scheme and I'll check if it is licensed.",
@@ -54,6 +67,51 @@ const T = {
     "This is guidance, not financial advice, and not a guarantee. When in doubt, don't pay — verify with CMSA (cmsa.go.tz) or BoT (bot.go.tz).",
     "Haya ni mwongozo, si ushauri wa kifedha, wala si uhakika. Ukiwa na shaka, usilipe — thibitisha na CMSA (cmsa.go.tz) au BoT (bot.go.tz).",
   ),
+
+  // ─── Report-a-problem funnel copy ────────────────────────────────────────
+  // BoT's own rule: the complainant must contact the FSP first and wait up to
+  // 14 working days for a response before escalating to BoT. The bot enforces
+  // both gates in copy, then collects the three facts BoT needs on a complaint
+  // (provider, issue, FSP response) and stamps a row for ops triage.
+  reportFspTitle: L(
+    "Before BoT can act on a complaint, you must first raise it with your bank, SACCOS, microfinance or mobile-money provider. Have you already contacted them?",
+    "Kabla BoT haijashughulikia malalamiko, lazima uwe umeyapeleka kwanza kwa benki, SACCOS, mikopo midogo au mtoa huduma wa pesa za simu. Je, tayari umewasiliana nao?",
+  ),
+  reportYes: L("Yes", "Ndiyo"),
+  reportNo: L("No", "Hapana"),
+  reportCancel: L("Cancel", "Ghairi"),
+  reportFspFirst: L(
+    "Please contact your provider first and keep the reference number, the date, and any reply they give you. If they do not resolve it within 14 days, come back and I will help you escalate to BoT.",
+    "Tafadhali wasiliana na mtoa huduma wako kwanza na uhifadhi namba ya rejea, tarehe na jibu lolote. Wasipotatua ndani ya siku 14, rudi nami nitakusaidia kupeleka BoT.",
+  ),
+  reportDaysTitle: L(
+    "Has it been at least 14 working days since you contacted the provider without a resolution?",
+    "Je, imepita angalau siku 14 za kazi tangu uwasiliane na mtoa huduma bila kupata majibu?",
+  ),
+  reportWaitMore: L(
+    "Thanks — give the provider the full 14 working days to respond, then come back and I will help you escalate to BoT.",
+    "Asante — mpe mtoa huduma siku kamili 14 za kazi kujibu, kisha urudi nami nitakusaidia kupeleka BoT.",
+  ),
+  reportAskProvider: L(
+    "Which provider is the complaint about? Type the full name (for example: CRDB Bank, Tigo Pesa, M-Koba).",
+    "Lalamiko ni kuhusu mtoa huduma yupi? Andika jina kamili (mfano: CRDB Bank, Tigo Pesa, M-Koba).",
+  ),
+  reportAskIssue: L(
+    "In one or two sentences, what happened? Include the date, the amount and any reference number you have.",
+    "Kwa sentensi moja au mbili, nini kilitokea? Taja tarehe, kiasi na namba yoyote ya rejea uliyonayo.",
+  ),
+  reportAskResponse: L(
+    "What did the provider say when you contacted them? If they did not reply, type \"no response\".",
+    "Mtoa huduma alijibu nini ulipowasiliana nao? Kama hawakujibu, andika \"hakuna jibu\".",
+  ),
+  reportCancelled: L(
+    "Report cancelled. You can start again any time from the Consumer Protection menu.",
+    "Ripoti imeghairiwa. Unaweza kuanza tena wakati wowote kutoka kwenye menyu ya Ulinzi wa Mteja.",
+  ),
+  reportSubmitted: L(
+    "Thank you — your complaint has been recorded and shared with our ops team to help you follow up with BoT.\n\nYou can also contact BoT directly:\n- Website: bot.go.tz\n- Email: botcommunications@bot.go.tz\n- Hotline: +255 22 223 3271 / 0800 110 046\n\nKeep every message and payment slip. This is guidance, not legal advice.",
+    "Asante — lalamiko lako limerekodiwa na limetumwa kwa timu yetu ili kukusaidia kufuatilia na BoT.\n\nUnaweza pia kuwasiliana na BoT moja kwa moja:\n- Tovuti: bot.go.tz\n- Barua pepe: botcommunications@bot.go.tz\n- Simu: +255 22 223 3271 / 0800 110 046\n\nHifadhi kila ujumbe na risiti ya malipo. Huu ni mwongozo, siyo ushauri wa kisheria.",
+  ),
 };
 
 // ─── Menu ────────────────────────────────────────────────────────────────────
@@ -62,6 +120,7 @@ export async function sendConsumerMenu(to: string, lang: Lang, send: Sender): Pr
     { id: CONSUMER_IDS.verify, title: T.verify[lang] },
     { id: CONSUMER_IDS.scan, title: T.scan[lang] },
     { id: CONSUMER_IDS.tips, title: T.tips[lang] },
+    { id: CONSUMER_IDS.report, title: T.report[lang] },
     { id: CONSUMER_IDS.back, title: T.back[lang] },
   ];
   await send({ to, kind: "list", body: T.title[lang], listButton: T.open[lang], rows });
@@ -72,6 +131,56 @@ export async function promptVerify(to: string, lang: Lang, send: Sender): Promis
 }
 export async function promptScan(to: string, lang: Lang, send: Sender): Promise<void> {
   await send({ to, kind: "text", body: T.askScan[lang] });
+}
+
+// ─── Report-a-problem senders ────────────────────────────────────────────────
+// Each step renders yes/no (or just cancel) as buttons rather than list rows so
+// the user can tap through quickly on mobile; the bot router state-gates the
+// button ids so a stray tap outside the flow is ignored.
+export async function promptReportFspCheck(to: string, lang: Lang, send: Sender): Promise<void> {
+  await send({
+    to,
+    kind: "buttons",
+    body: T.reportFspTitle[lang],
+    buttons: [
+      { id: REPORT_IDS.fspYes, title: T.reportYes[lang] },
+      { id: REPORT_IDS.fspNo, title: T.reportNo[lang] },
+      { id: REPORT_IDS.cancel, title: T.reportCancel[lang] },
+    ],
+  });
+}
+export async function promptReportDaysCheck(to: string, lang: Lang, send: Sender): Promise<void> {
+  await send({
+    to,
+    kind: "buttons",
+    body: T.reportDaysTitle[lang],
+    buttons: [
+      { id: REPORT_IDS.daysYes, title: T.reportYes[lang] },
+      { id: REPORT_IDS.daysNo, title: T.reportNo[lang] },
+      { id: REPORT_IDS.cancel, title: T.reportCancel[lang] },
+    ],
+  });
+}
+export async function promptReportProvider(to: string, lang: Lang, send: Sender): Promise<void> {
+  await send({ to, kind: "text", body: T.reportAskProvider[lang] });
+}
+export async function promptReportIssue(to: string, lang: Lang, send: Sender): Promise<void> {
+  await send({ to, kind: "text", body: T.reportAskIssue[lang] });
+}
+export async function promptReportResponse(to: string, lang: Lang, send: Sender): Promise<void> {
+  await send({ to, kind: "text", body: T.reportAskResponse[lang] });
+}
+export async function sendReportFspFirstGuidance(to: string, lang: Lang, send: Sender): Promise<void> {
+  await send({ to, kind: "text", body: T.reportFspFirst[lang] });
+}
+export async function sendReportWaitPeriodGuidance(to: string, lang: Lang, send: Sender): Promise<void> {
+  await send({ to, kind: "text", body: T.reportWaitMore[lang] });
+}
+export async function sendReportSubmitted(to: string, lang: Lang, send: Sender): Promise<void> {
+  await send({ to, kind: "text", body: T.reportSubmitted[lang] });
+}
+export async function sendReportCancelled(to: string, lang: Lang, send: Sender): Promise<void> {
+  await send({ to, kind: "text", body: T.reportCancelled[lang] });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -264,10 +373,25 @@ export async function sendTips(to: string, lang: Lang, send: Sender): Promise<vo
 export async function replyVerify(to: string, lang: Lang, query: string, send: Sender): Promise<void> {
   const res = verifyLicence(query);
   log("ROUTE", { mode: "consumer", action: "verify", status: res.status });
+  metrics.licenceCheck(res.status, lang);
   await send({ to, kind: "text", body: formatLicence(res, lang) });
 }
 export async function replyScan(to: string, lang: Lang, message: string, send: Sender): Promise<void> {
   const res = scanMessage(message);
   log("ROUTE", { mode: "consumer", action: "scan", band: res.band, score: res.score });
+  metrics.scamScan(res.band, lang);
+  // Only medium / high are worth a row in cfe_scam_reports — low-risk pastes
+  // are noise. Entity is the named-flagged provider when we matched one,
+  // otherwise a short redacted preview.
+  if (res.band !== "low") {
+    const entity = res.namedFlagged?.name
+      ?? (message || "").slice(0, 80).replace(/\s+/g, " ").trim()
+      ?? "unknown";
+    recordScamReport({
+      entity,
+      flags: res.flags.map((f) => f.code),
+      risk: res.band,
+    });
+  }
   await send({ to, kind: "text", body: formatScan(res, lang) });
 }

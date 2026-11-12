@@ -15,16 +15,28 @@ import { answerFeedback, pickQuiz, QUIZ_BANK, quizResult } from "./quiz.ts";
 import { askClaude, claudeEnabled } from "./llm.ts";
 import { log } from "./logger.ts";
 import * as metrics from "./metrics.ts";
-import type { Session, SessionStore } from "./session.ts";
+import type { ReportStage } from "./metrics.ts";
+import { recordConsumerReport, recordHitl } from "./recorder.ts";
+import type { BotState, Session, SessionStore } from "./session.ts";
 import type { Sender } from "./whatsapp.ts";
 import { backToModesRow, detectLang, sendEducationMenu } from "./tools/education.ts";
 import {
   CONSUMER_IDS,
+  promptReportDaysCheck,
+  promptReportFspCheck,
+  promptReportIssue,
+  promptReportProvider,
+  promptReportResponse,
   promptScan,
   promptVerify,
   replyScan,
   replyVerify,
+  REPORT_IDS,
   sendConsumerMenu,
+  sendReportCancelled,
+  sendReportFspFirstGuidance,
+  sendReportSubmitted,
+  sendReportWaitPeriodGuidance,
   sendTips,
 } from "./tools/consumer.ts";
 import {
@@ -134,6 +146,20 @@ const S = {
   ),
   langSet: L("Language set to English", "Lugha imewekwa: Kiswahili"),
 };
+
+// Map a session state inside the BoT-escalation flow to the ReportStage label
+// used by the abandon counter. Returns null for any state that is NOT part of
+// the report funnel so callers can early-out without a stage write.
+function reportStageOf(state: BotState): ReportStage | null {
+  switch (state) {
+    case "consumer_report_fsp_check": return "fsp_check";
+    case "consumer_report_days_check": return "days_check";
+    case "consumer_report_provider_wait": return "provider_wait";
+    case "consumer_report_issue_wait": return "issue_wait";
+    case "consumer_report_response_wait": return "response_wait";
+    default: return null;
+  }
+}
 
 const NAV_WORDS = ["menu", "menyu", "main", "start", "anza"];
 // Free-text triggers that jump straight to the onboarding platform picker.
@@ -467,6 +493,12 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
 
     // ── global nav ──
     if (NAV_WORDS.includes(text) || text === "go_modes") {
+      const abandonedStage = reportStageOf(s.state);
+      if (abandonedStage) {
+        metrics.consumerReportAbandoned(abandonedStage, lang);
+        log("ROUTE", { branch: "consumer_report_abandoned", from, stage: abandonedStage, via: "nav" });
+      }
+      s.reportDraft = null;
       s.state = "mode_pick";
       s.mode = null;
       log("ROUTE", { branch: "mode_pick", from });
@@ -560,6 +592,69 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
       await sendTips(from, lang, loggedSend);
       await save();
       return await sendConsumerMenu(from, lang, loggedSend);
+    }
+
+    // ── consumer-protection: BoT escalation funnel ──
+    // Entry button: start the FSP-first / 14-day gate before collecting
+    // anything. `reportDraft` lives on the session so partial drafts show up
+    // in the dashboard and survive a disconnect.
+    if (text === CONSUMER_IDS.report) {
+      s.mode = "consumer";
+      s.state = "consumer_report_fsp_check";
+      s.reportDraft = {};
+      metrics.consumerReportStarted(lang);
+      log("ROUTE", { branch: "consumer_report_start", from });
+      await save();
+      return await promptReportFspCheck(from, lang, loggedSend);
+    }
+    // Universal cancel — works from any report sub-state and nowhere else.
+    if (text === REPORT_IDS.cancel && reportStageOf(s.state)) {
+      const stage = reportStageOf(s.state)!;
+      metrics.consumerReportAbandoned(stage, lang);
+      log("ROUTE", { branch: "consumer_report_cancel", from, stage });
+      s.reportDraft = null;
+      s.state = "consumer_menu";
+      await sendReportCancelled(from, lang, loggedSend);
+      await save();
+      return await sendConsumerMenu(from, lang, loggedSend);
+    }
+    // Gate 1: FSP-first check.
+    if (s.mode === "consumer" && s.state === "consumer_report_fsp_check") {
+      if (text === REPORT_IDS.fspYes) {
+        metrics.consumerReportFspCheck("yes", lang);
+        s.state = "consumer_report_days_check";
+        log("ROUTE", { branch: "consumer_report_fsp_yes", from });
+        await save();
+        return await promptReportDaysCheck(from, lang, loggedSend);
+      }
+      if (text === REPORT_IDS.fspNo) {
+        metrics.consumerReportFspCheck("no", lang);
+        log("ROUTE", { branch: "consumer_report_fsp_no", from });
+        s.reportDraft = null;
+        s.state = "consumer_menu";
+        await sendReportFspFirstGuidance(from, lang, loggedSend);
+        await save();
+        return await sendConsumerMenu(from, lang, loggedSend);
+      }
+    }
+    // Gate 2: 14-day waiting period.
+    if (s.mode === "consumer" && s.state === "consumer_report_days_check") {
+      if (text === REPORT_IDS.daysYes) {
+        metrics.consumerReportDaysCheck("yes", lang);
+        s.state = "consumer_report_provider_wait";
+        log("ROUTE", { branch: "consumer_report_days_yes", from });
+        await save();
+        return await promptReportProvider(from, lang, loggedSend);
+      }
+      if (text === REPORT_IDS.daysNo) {
+        metrics.consumerReportDaysCheck("no", lang);
+        log("ROUTE", { branch: "consumer_report_days_no", from });
+        s.reportDraft = null;
+        s.state = "consumer_menu";
+        await sendReportWaitPeriodGuidance(from, lang, loggedSend);
+        await save();
+        return await sendConsumerMenu(from, lang, loggedSend);
+      }
     }
 
     // ── education navigation ──
@@ -798,6 +893,55 @@ export function createBot(store: SessionStore, send: Sender, opts: BotOptions = 
     if (s.mode === "consumer" && s.state === "consumer_scan_wait") {
       await replyScan(from, lang, raw.trim(), loggedSend);
       s.state = "consumer_menu";
+      await save();
+      return await sendConsumerMenu(from, lang, loggedSend);
+    }
+    // Report funnel: capture provider → issue → response, then submit.
+    if (s.mode === "consumer" && s.state === "consumer_report_provider_wait") {
+      const name = raw.trim();
+      if (!name) return await promptReportProvider(from, lang, loggedSend);
+      s.reportDraft = { ...(s.reportDraft ?? {}), fspName: name };
+      s.state = "consumer_report_issue_wait";
+      metrics.consumerReportProviderCaptured(lang);
+      log("ROUTE", { branch: "consumer_report_provider_captured", from });
+      await save();
+      return await promptReportIssue(from, lang, loggedSend);
+    }
+    if (s.mode === "consumer" && s.state === "consumer_report_issue_wait") {
+      const issue = raw.trim();
+      if (!issue) return await promptReportIssue(from, lang, loggedSend);
+      s.reportDraft = { ...(s.reportDraft ?? {}), issue };
+      s.state = "consumer_report_response_wait";
+      log("ROUTE", { branch: "consumer_report_issue_captured", from });
+      await save();
+      return await promptReportResponse(from, lang, loggedSend);
+    }
+    if (s.mode === "consumer" && s.state === "consumer_report_response_wait") {
+      const response = raw.trim();
+      if (!response) return await promptReportResponse(from, lang, loggedSend);
+      const draft = { ...(s.reportDraft ?? {}), fspResponse: response };
+      // Persist the row (BoT gate already passed) and enqueue an ops task so a
+      // human can shepherd the complaint through BoT's email / hotline channels.
+      const id = recordConsumerReport({
+        userId: from,
+        lang,
+        fspName: draft.fspName ?? "",
+        issue: draft.issue ?? "",
+        fspResponse: response,
+        daysSinceFsp: 14,
+      });
+      recordHitl({
+        kind: "escalation",
+        tag: "BoT complaint",
+        title: `BoT complaint: ${(draft.fspName ?? "").slice(0, 80)}`,
+        sub: (draft.issue ?? "").slice(0, 200),
+        slaLabel: "48h",
+      });
+      metrics.consumerReportSubmitted(lang);
+      log("ROUTE", { branch: "consumer_report_submitted", from, id });
+      s.reportDraft = null;
+      s.state = "consumer_menu";
+      await sendReportSubmitted(from, lang, loggedSend);
       await save();
       return await sendConsumerMenu(from, lang, loggedSend);
     }
